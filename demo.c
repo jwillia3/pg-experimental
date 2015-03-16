@@ -50,8 +50,54 @@ Pg *pgNewGdiCanvas(int width, int height) {
     return &g->g;
 }
 
+void save() {
+    #pragma pack(push)
+    #pragma pack(1)
+    struct {
+        struct { uint8_t sig[2]; uint32_t total, resv, offs; };
+        struct { uint32_t sz, width, height;
+            uint16_t planes, bits;
+            uint32_t compression, dataSize, xres, yres, used, important;
+        } bmp;
+    } head = {
+        { "BM", sizeof head + G->width * G->height * 4, 0, sizeof head },
+        { sizeof head.bmp, G->width, -G->height, 1, 32, 0,
+          G->width * G->height * 4, 96, 96, -1, -1 }
+    };
+    #pragma pack(pop)
+    FILE *file = fopen("out.bmp", "wb");
+    fwrite(&head, 1, sizeof head, file);
+    fwrite(G->bmp, 1, G->width * G->height * 4, file);
+    fclose(file);
+}
+
 void repaint() {
+    static int fps;
+    static int oldFps;
+    static int tick;
+    
+    PgPt v[] = {
+        pgPt(10, 10),
+        pgPt(50, 50),
+        pgPt(10, 100),
+        pgPt(150, 100),
+    };
+    int n = sizeof v / sizeof *v;
+    
     pgClearCanvas(G, bg);
+    PgMatrix ctm = PgIdentity;
+    pgRotateMatrix(&ctm, tick / 180.0f * 8.0f);
+    pgTranslateMatrix(&ctm, G->width / 2.0f, G->height / 2.0f);
+    pgTransformPoints(&ctm, v, n);
+    
+//    G->triangle(G, v[0], v[1], v[2], fg);
+    G->triangleStrip(G, v, n, fg);
+    fps = 60;
+    
+    if (!fps && oldFps) KillTimer(W, 0);
+    if (fps) SetTimer(W, 0, 1000 / fps, NULL);
+    oldFps = fps;
+    tick++;
 }
 void create() {
     G = pgNewGdiCanvas(0, 0);
@@ -73,13 +119,23 @@ LRESULT WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
         EndPaint(hwnd, &ps);
         return 0;
         }
+    case WM_CHAR:
+        if (wparam == 3) { // ^C
+            save();
+            system("start mspaint out.bmp");
+            PostQuitMessage(0);
+        }
+        return 0;
     case WM_SIZE:
         pgResizeCanvas(G, LOWORD(lparam), HIWORD(lparam));
         repaint();
         return 0;
+    case WM_TIMER:
+        repaint();
+        InvalidateRect(hwnd, NULL, false);
+        return 0;
     case WM_CREATE:
         W = hwnd;
-        puts("W");
         create();
         return 0;
     case WM_ERASEBKGND:
