@@ -80,7 +80,7 @@ static void bmp_resize(Pg *g, int width, int height) {
     g->height = height;
     g->bmp = malloc(width * height * 4);
 }
-void bmp_fillPath(Pg *g, PgPath *path, uint32_t color) {
+static segs_t bmp_segmentPath(PgPath *path, PgMatrix ctm, bool close) {
     segs_t segs = { .data = NULL, .n = 0 };
     PgPt *p = path->data;
     int *t = (int*)path->types;
@@ -91,24 +91,29 @@ void bmp_fillPath(Pg *g, PgPath *path, uint32_t color) {
             if (*t == PG_LINE) addSeg(&segs, a, p[0]);
             else if (*t == PG_QUAD) segmentQuad(&segs, a, p[0], p[1]);
             else if (*t == PG_CUBIC) segmentCubic(&segs, a, p[0], p[1], p[2]);
-        addSeg(&segs, a, first);
+        if (close)
+            addSeg(&segs, a, first);
     }
     // Transform points and make sure point A is the above B
     // Then sort them so that A's that Y's are first; for ties, low X's first
-    float maxY = FLT_MIN;
     for (int i = 0; i < segs.n; i++) {
-        PgPt a = pgTransformPoint(&g->ctm, segs.data[i].a);
-        PgPt b = pgTransformPoint(&g->ctm, segs.data[i].b);
+        PgPt a = pgTransformPoint(&ctm, segs.data[i].a);
+        PgPt b = pgTransformPoint(&ctm, segs.data[i].b);
         float m = a.y < b.y?
             (b.x - a.x) / (b.y - a.y):
             a.y == b.y? 0: (a.x - b.x) / (a.y - b.y);
         segs.data[i].a = a.y < b.y? a: b;
         segs.data[i].b = a.y < b.y? b: a;
         segs.data[i].m = m;
-        if (maxY < segs.data[i].b.y)
-            maxY = segs.data[i].b.y;
     }
+    return segs;
+}
+static void bmp_fillPath(Pg *g, PgPath *path, uint32_t color) {
+    segs_t segs = bmp_segmentPath(path, g->ctm, true);
     qsort(segs.data, segs.n, sizeof(seg_t), sortSegsDescending);
+    float maxY = segs.data[0].b.y;
+    for (seg_t *seg = segs.data + 1; seg < segs.data + segs.n; seg++)
+        maxY = max(maxY, seg->b.y);
     
     // Scan through lines filling between edge
     typedef struct { float x, m, y2; } edge_t;
@@ -157,12 +162,41 @@ void bmp_fillPath(Pg *g, PgPath *path, uint32_t color) {
     free(edges);
     free(segs.data);
 }
+static void bmp_strokePath(Pg *g, PgPath *path, float width, uint32_t color) {
+    PgMatrix otm = g->ctm;
+    segs_t segs = bmp_segmentPath(path, g->ctm, false);
+    for (seg_t *seg = segs.data; seg < segs.data + segs.n; seg++) {
+        PgPath *sub = pgNewPath();
+        float dx = seg->b.x - seg->a.x;
+        float dy = seg->b.y - seg->a.y;
+        float len = sqrt(dx*dx + dy*dy);
+        float rad = atan2f(dy, dx);
+        pgIdentity(g);
+        pgRotate(g, rad);
+        pgTranslate(g, seg->a.x, seg->a.y);
+        PgPt vert[4] = {
+            { -width / 2.0f, -width / 2.0f },
+            { len + width / 2.0f, -width / 2.0f },
+            { len + width / 2.0f, +width / 2.0f },
+            { -width / 2.0f, + width / 2.0f },
+        };
+        pgMove(sub, vert[0]);
+        pgLine(sub, vert[1]);
+        pgLine(sub, vert[2]);
+        pgLine(sub, vert[3]);
+        pgFillPath(g, sub, color);
+        pgFreePath(sub);
+    }
+    free(segs.data);
+    g->ctm = otm;
+}
 Pg *pgNewBitmapCanvas(int width, int height) {
     Pg *g = calloc(1, sizeof *g);
     g->resize = bmp_resize;
     g->clear = bmp_clear;
     g->free = bmp_free;
     g->fillPath = bmp_fillPath;
+    g->strokePath = bmp_strokePath;
     pgIdentityMatrix(&g->ctm);
     g->resize(g, width, height);
     return g;
@@ -293,4 +327,7 @@ void pgCubic(PgPath *path, PgPt b, PgPt c, PgPt d) {
 }
 void pgFillPath(Pg *g, PgPath *path, uint32_t color) {
     g->fillPath(g, path, color);
+}
+void pgStrokePath(Pg *g, PgPath *path, float width, uint32_t color) {
+    g->strokePath(g, path, width, color);
 }

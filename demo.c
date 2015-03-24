@@ -14,8 +14,8 @@
 #pragma comment(lib, "user32")
 #pragma comment(lib, "pg")
 
-uint32_t bg = 0xc0b080;
-uint32_t fg = 0x202060;
+uint32_t bg = 0x404040;
+uint32_t fg = 0xf09050;
 HWND W;
 Pg  *G;
 
@@ -203,10 +203,23 @@ void repaint() {
 
     for (int i = 0; TestSVG[i]; i++) {
         PgPath *path = pgGetSvgPath(TestSVG[i]);
+        pgStrokePath(G, path, 20.0f, ~fg);
+        pgFreePath(path);
+    }
+    for (int i = 0; TestSVG[i]; i++) {
+        PgPath *path = pgGetSvgPath(TestSVG[i]);
         pgFillPath(G, path, fg);
         pgFreePath(path);
     }
 
+//    pgIdentity(G);
+//    pgRotate(G, tick / 180.0f * 8.0f);
+//    pgTranslate(G, G->width / 2.0f, G->height / 2.0f);
+//    pgStrokePath(G, pgGetSvgPath(
+//        "M0,0"
+//        " v100"
+//        ), 20.0f, fg);
+//    fps = 10;
     fps = 60;
     
     if (!fps && oldFps) KillTimer(W, 0);

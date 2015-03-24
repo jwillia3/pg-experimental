@@ -18,6 +18,7 @@ struct Pg {
     void (*clear)(Pg *pg, uint32_t color);
     void (*free)(Pg *pg);
     void (*fillPath)(Pg *g, PgPath *path, uint32_t color);
+    void (*strokePath)(Pg *g, PgPath *path, float width, uint32_t color);
 };
 
 static PgPt pgPt(float x, float y) { return (PgPt){x,y}; }
@@ -53,3 +54,4 @@ static PgPt pgPt(float x, float y) { return (PgPt){x,y}; }
     void pgQuad(PgPath *path, PgPt b, PgPt c);
     void pgCubic(PgPath *path, PgPt b, PgPt c, PgPt d);
     void pgFillPath(Pg *g, PgPath *path, uint32_t color);
+    void pgStrokePath(Pg *g, PgPath *path, float width, uint32_t color);
