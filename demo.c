@@ -1,6 +1,7 @@
 #define UNICODE
 #define WIN32_WINNT 0x0601
 #define WIN32_LEAN_AND_MEAN
+#include <ctype.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -8,12 +9,13 @@
 #include <string.h>
 #include <windows.h>
 #include "pg.h"
+#include "demo.h"
 #pragma comment(lib, "gdi32")
 #pragma comment(lib, "user32")
 #pragma comment(lib, "pg")
 
-uint32_t fg = 0x808080;
-uint32_t bg = 0xffff80;
+uint32_t bg = 0xc0b080;
+uint32_t fg = 0x202060;
 HWND W;
 Pg  *G;
 
@@ -50,6 +52,123 @@ Pg *pgNewGdiCanvas(int width, int height) {
     return &g->g;
 }
 
+PgPath *pgGetSvgPath(const char *svg) {
+    static char params[256];
+    if (!params['m']) {
+        char *name = "mzlhvcsqt";
+        int n[] = { 2, 0, 2, 1, 1, 6, 4, 4, 2 };
+        memset(params, -1, 256);
+        for (int i = 0; name[i]; i++)
+            params[name[i]] = params[toupper(name[i])] = n[i];
+    }
+    
+    PgPath     *path = pgNewPath();
+    PgPt       cur = {0,0};
+    PgPt       start = {0,0};
+    PgPt       reflect = {0,0};
+    PgPt       b, c;
+    int         cmd;
+    float       a[6];
+    while (*svg) {
+        while (isspace(*svg) || *svg==',') svg++;
+        if (params[*svg] >= 0) // continue last command
+            cmd = *svg++;
+        
+        for (int i = 0; i < params[cmd]; i++) {
+            while (isspace(*svg) || *svg==',') svg++;
+            a[i] = strtof(svg, (char**)&svg);
+        }
+
+        switch (cmd) {
+        case 'm':
+            start = cur = pgPt(cur.x + a[0], cur.y + a[1]);
+            pgMove(path, cur);
+            break;
+        case 'M':
+            start = cur = pgPt(a[0], a[1]);
+            pgMove(path, cur);
+            break;
+        case 'Z':
+        case 'z':
+            cur = start;
+            break;
+        case 'L':
+            cur = pgPt(a[0], a[1]);
+            pgLine(path, cur);
+            break;
+        case 'l':
+            cur = pgPt(cur.x + a[0], cur.y + a[1]);
+            pgLine(path, cur);
+            break;
+        case 'h':
+            cur = pgPt(cur.x + a[0], cur.y);
+            pgLine(path, cur);
+            break;
+        case 'H':
+            cur = pgPt(a[0], cur.y);
+            pgLine(path, cur);
+            break;
+        case 'v':
+            cur = pgPt(cur.x, cur.y + a[0]);
+            pgLine(path, cur);
+            break;
+        case 'V':
+            cur = pgPt(cur.x, a[0]);
+            pgLine(path, cur);
+            break;
+        case 'c':
+            b = pgPt(cur.x + a[0], cur.y + a[1]);
+            reflect = pgPt(cur.x + a[2], cur.y + a[3]);
+            cur = pgPt(cur.x + a[4], cur.y + a[5]);
+            pgCubic(path, b, reflect, cur);
+            break;
+        case 'C':
+            b = pgPt(a[0], a[1]);
+            reflect = pgPt(a[2], a[3]);
+            cur = pgPt(a[4], a[5]);
+            pgCubic(path, b, reflect, cur);
+            break;
+        case 's':
+            b = pgPt( cur.x + (cur.x - reflect.x),
+                    cur.y + (cur.y - reflect.y));
+            reflect = pgPt(cur.x + a[0], cur.y + a[1]);
+            cur = pgPt(cur.x + a[2], cur.y + a[3]);
+            pgCubic(path, b, reflect, cur);
+            break;
+        case 'S':
+            b = pgPt( cur.x + (cur.x - reflect.x),
+                    cur.y + (cur.y - reflect.y));
+            reflect = pgPt(a[0], a[1]);
+            cur = pgPt(a[2], a[3]);
+            pgCubic(path, b, reflect, cur);
+            break;
+        case 'q':
+            reflect = pgPt(cur.x + a[0], cur.y + a[1]);
+            cur = pgPt(cur.x + a[2], cur.y + a[3]);
+            pgQuad(path, reflect, cur);
+            break;
+        case 'Q':
+            reflect = pgPt(a[0], a[1]);
+            cur = pgPt(a[2], a[3]);
+            pgQuad(path, reflect, cur);
+            break;
+        case 't':
+            reflect = pgPt(cur.x + (cur.x - reflect.x),
+                         cur.y + (cur.y - reflect.y));
+            cur = pgPt(cur.x + a[0], cur.y + a[1]);
+            pgQuad(path, reflect, cur);
+            break;
+        case 'T':
+            reflect = pgPt(cur.x + (cur.x - reflect.x),
+                         cur.y + (cur.y - reflect.y));
+            cur = pgPt(a[0], a[1]);
+            pgQuad(path, reflect, cur);
+            break;
+        }
+    }
+    return path;
+}
+
 void save() {
     #pragma pack(push)
     #pragma pack(1)
@@ -71,33 +190,28 @@ void save() {
     fclose(file);
 }
 
+int fps;
+int tick;
 void repaint() {
-    static int fps;
     static int oldFps;
-    static int tick;
-    
-    PgPt v[] = {
-        pgPt(10, 10),
-        pgPt(50, 50),
-        pgPt(10, 100),
-        pgPt(150, 100),
-    };
-    int n = sizeof v / sizeof *v;
     
     pgClearCanvas(G, bg);
-    PgMatrix ctm = PgIdentity;
-    pgRotateMatrix(&ctm, tick / 180.0f * 8.0f);
-    pgTranslateMatrix(&ctm, G->width / 2.0f, G->height / 2.0f);
-    pgTransformPoints(&ctm, v, n);
-    
-//    G->triangle(G, v[0], v[1], v[2], fg);
-    G->triangleStrip(G, v, n, fg);
+    pgIdentity(G);
+    pgTranslate(G, -200, -250);
+    pgRotate(G, tick / 180.0f * 8.0f);
+    pgTranslate(G, G->width / 2.0f, G->height / 2.0f);
+
+    for (int i = 0; TestSVG[i]; i++) {
+        PgPath *path = pgGetSvgPath(TestSVG[i]);
+        pgFillPath(G, path, fg);
+        pgFreePath(path);
+    }
+
     fps = 60;
     
     if (!fps && oldFps) KillTimer(W, 0);
     if (fps) SetTimer(W, 0, 1000 / fps, NULL);
     oldFps = fps;
-    tick++;
 }
 void create() {
     G = pgNewGdiCanvas(0, 0);
@@ -126,11 +240,17 @@ LRESULT WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
             PostQuitMessage(0);
         }
         return 0;
+    case WM_KEYDOWN:
+        if (wparam == VK_LEFT && tick > 0) { tick--; repaint(); InvalidateRect(hwnd, NULL, false); }
+        if (wparam == VK_RIGHT) { tick++; repaint(); InvalidateRect(hwnd, NULL, false); }
+        return 0;
+        
     case WM_SIZE:
         pgResizeCanvas(G, LOWORD(lparam), HIWORD(lparam));
         repaint();
         return 0;
     case WM_TIMER:
+        tick++;
         repaint();
         InvalidateRect(hwnd, NULL, false);
         return 0;
@@ -149,17 +269,17 @@ LRESULT WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
 
 int WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
     HINSTANCE kernel32 = LoadLibrary(L"kernel32.dll");
-	BOOL (*GetProcessUserModeExceptionPolicy)(DWORD*) = kernel32? (void*)GetProcAddress(kernel32, "GetProcessUserModeExceptionPolicy"): 0;
-	BOOL (*SetProcessUserModeExceptionPolicy)(DWORD) = kernel32? (void*)GetProcAddress(kernel32, "SetProcessUserModeExceptionPolicy"): 0;
-	if (!GetProcessUserModeExceptionPolicy)
-		FatalAppExit(0, L"XXX");
+    BOOL (*GetProcessUserModeExceptionPolicy)(DWORD*) = kernel32? (void*)GetProcAddress(kernel32, "GetProcessUserModeExceptionPolicy"): 0;
+    BOOL (*SetProcessUserModeExceptionPolicy)(DWORD) = kernel32? (void*)GetProcAddress(kernel32, "SetProcessUserModeExceptionPolicy"): 0;
+    if (!GetProcessUserModeExceptionPolicy)
+        FatalAppExit(0, L"XXX");
     WNDCLASS wc = { CS_HREDRAW|CS_VREDRAW, WndProc, 0, 0,
         GetModuleHandle(NULL), LoadIcon(NULL, IDI_APPLICATION),
         LoadCursor(NULL, IDC_ARROW), (HBRUSH)(COLOR_WINDOW + 1),
         NULL, L"GenericWindow" };
     RegisterClass(&wc);
     
-    RECT r = { 0, 0, 800, 600 };
+    RECT r = { 0, 0, 1280, 1024 };
     AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, false);
     CreateWindow(L"GenericWindow", L"Window",
         WS_OVERLAPPEDWINDOW|WS_VISIBLE,

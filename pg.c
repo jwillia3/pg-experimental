@@ -1,3 +1,7 @@
+#include <assert.h>
+#include <float.h>
+#include <math.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -12,6 +16,40 @@ static float max(float a, float b) { return a > b? a: b; }
 static float clamp(float a, float b, float c) { return min(max(a, b), c); }
 static float fraction(float a) { return a - floor(a); }
 
+typedef struct { float x, m, y2; } edge_t;
+typedef struct { PgPt a, b; float m; } seg_t;
+typedef struct { seg_t *data; int n, cap; } segs_t;
+static void addSeg(segs_t *segs, PgPt a, PgPt b) {
+    if (segs->n >= segs->cap) {
+        segs->cap = segs->cap? segs->cap * 2: 8;
+        segs->data = realloc(segs->data, segs->cap * sizeof(seg_t));
+    }
+    segs->data[segs->n++] = (seg_t) { a, b };
+}
+static float Flatness = 0.0625f;
+static void segmentQuad(segs_t *segs, PgPt a, PgPt b, PgPt c) {
+    PgPt p = a, q;
+    for (float i = 0, j = 1.0f; i <= 1.0f; p = q, j = 1.0f - (i += Flatness))
+        addSeg(segs, p, q = pgPt(
+            j*j*a.x + 2*j*i*b.x + i*i*c.x,
+            j*j*a.y + 2*j*i*b.y + i*i*c.y));
+}
+static void segmentCubic(segs_t *segs, PgPt a, PgPt b, PgPt c, PgPt d) {
+    PgPt p = a, q;
+    for (float i = 0, j = 1.0f; i <= 1.0f; p = q, j = 1.0f - (i += Flatness))
+        addSeg(segs, p, q = pgPt(
+            j*j*j*a.x + 3*j*j*i*b.x + 3*j*i*i*c.x + i*i*i*d.x,
+            j*j*j*a.y + 3*j*j*i*b.y + 3*j*i*i*c.y + i*i*i*d.y));
+}
+static int sortSegsDescending(const void *x, const void *y) {
+    const seg_t *a = x;
+    const seg_t *b = y;
+    return
+        a->a.y < b->a.y? -1:
+        a->a.y > b->a.y? 1:
+        a->a.x < b->a.x? -1:
+        a->a.x > b->a.x? 1: 0;
+}
 
 static uint32_t blend(uint32_t fg, uint32_t bg, uint32_t a) {
     if (a == 0xff)
@@ -42,50 +80,89 @@ static void bmp_resize(Pg *g, int width, int height) {
     g->height = height;
     g->bmp = malloc(width * height * 4);
 }
-static void bmp_hline(uint32_t *__restrict bmp, float x1, float x2, uint32_t color) {
-    int a = x1;
-    int b = x2;
-    bmp[a] = blend(bmp[a], color, fraction(x1) * 255);
-    for (int x = a + 1; x <= b; x++) bmp[x] = color;
-    bmp[b+1] = blend(bmp[b+1], color, (1 - fraction(x2)) * 255);
-}
-static void bmp_triangle(Pg *g, PgPt a, PgPt b, PgPt c, uint32_t color) {
-    if (a.y > b.y) { PgPt t = b; b = a; a = t; }
-    if (b.y > c.y) {
-        PgPt t = b;
-        if (a.y > c.y) { b = a; a = c; c = t; }
-        else { b = c; c = t; }
+void bmp_fillPath(Pg *g, PgPath *path, uint32_t color) {
+    segs_t segs = { .data = NULL, .n = 0 };
+    PgPt *p = path->data;
+    int *t = (int*)path->types;
+    // Decompose curves into line segments
+    for (int *sub = path->subs; sub < path->subs + path->nsubs; sub++) {
+        PgPt a = *p++, first = a;
+        for (PgPt *end = p + *sub - 1; p < end; a = (p += *t++)[-1])
+            if (*t == PG_LINE) addSeg(&segs, a, p[0]);
+            else if (*t == PG_QUAD) segmentQuad(&segs, a, p[0], p[1]);
+            else if (*t == PG_CUBIC) segmentCubic(&segs, a, p[0], p[1], p[2]);
+        addSeg(&segs, a, first);
     }
-    float ab = b.y - a.y > 0? (b.x - a.x) / (b.y - a.y): 0;
-    float ac = c.y - a.y > 0? (c.x - a.x) / (c.y - a.y): 0;
-    float bc = c.y - b.y > 0? (c.x - b.x) / (c.y - b.y): 0;
-    float x1 = a.x, x2 = a.x;
-    uint32_t *__restrict bmp = g->bmp + (int)a.y * g->width;
-    if (ab > ac) {
-        for (float y = a.y; y < b.y; y++, bmp += g->width, x1 += ac, x2 += ab)
-            bmp_hline(bmp, x1, x2, color);
-        x2 = b.x;
-        for (float y = b.y; y < c.y; y++, bmp += g->width, x1 += ac, x2 += bc)
-            bmp_hline(bmp, x1, x2, color);
-    } else {
-        for (float y = a.y; y < b.y; y++, bmp += g->width, x1 += ab, x2 += ac)
-            bmp_hline(bmp, x1, x2, color);
-        x1 = b.x;
-        for (float y = b.y; y < c.y; y++, bmp += g->width, x1 += bc, x2 += ac)
-            bmp_hline(bmp, x1, x2, color);
+    // Transform points and make sure point A is the above B
+    // Then sort them so that A's that Y's are first; for ties, low X's first
+    float maxY = FLT_MIN;
+    for (int i = 0; i < segs.n; i++) {
+        PgPt a = pgTransformPoint(&g->ctm, segs.data[i].a);
+        PgPt b = pgTransformPoint(&g->ctm, segs.data[i].b);
+        float m = a.y < b.y?
+            (b.x - a.x) / (b.y - a.y):
+            a.y == b.y? 0: (a.x - b.x) / (a.y - b.y);
+        segs.data[i].a = a.y < b.y? a: b;
+        segs.data[i].b = a.y < b.y? b: a;
+        segs.data[i].m = m;
+        if (maxY < segs.data[i].b.y)
+            maxY = segs.data[i].b.y;
     }
-}
-static void bmp_triangleStrip(Pg *g, PgPt *v, int n, uint32_t color) {
-    for (int i = 2; i < n; i++)
-        g->triangle(g, v[i - 2], v[i - 1], v[i], color);
+    qsort(segs.data, segs.n, sizeof(seg_t), sortSegsDescending);
+    
+    // Scan through lines filling between edge
+    typedef struct { float x, m, y2; } edge_t;
+    edge_t *edges = malloc(segs.n * sizeof (edge_t));
+    int nedges = 0;
+    seg_t *seg = segs.data;
+    seg_t *endSeg = seg + segs.n;
+    for (int scanY = max(0, segs.data[0].a.y); scanY < min(maxY, g->height); scanY++) {
+        float y = scanY + 0.5f;
+        edge_t *endEdge = edges + nedges;
+        nedges = 0;
+        for (edge_t *e = edges; e < endEdge; e++)
+            if (y < e->y2) {
+                e->x += e->m;
+                edges[nedges++] = *e;
+            }
+        for ( ; seg < endSeg && seg->a.y < y; seg++)
+            if (seg->b.y > y)
+                edges[nedges++] = (edge_t) {
+                    .x = seg->a.x + seg->m * (y - seg->a.y),
+                    .m = seg->m,
+                    .y2 = seg->b.y,
+                };
+        for (int i = 1; i < nedges; i++)
+            for (int j = i; j > 0 && edges[j - 1].x > edges[j].x; j--) {
+                edge_t tmp = edges[j];
+                edges[j] = edges[j - 1];
+                edges[j - 1] = tmp;
+            }
+        uint32_t *__restrict bmp = g->bmp + scanY * g->width;
+        for (edge_t *e = edges + 1; e < edges + nedges; e += 2) {
+            float x1 = e[-1].x;
+            float x2 = e[0].x;
+            if (x2 < 0 || x1 >= g->width) continue;
+            int a = max(0, x1);
+            int b = min(x2, g->width - 1);
+            if (x1 >= 0) {
+                bmp[a] = blend(bmp[a], color, fraction(x1) * 255);
+                a++;
+            }
+            for (int x = a; x < b; x++) bmp[x] = color;
+            if (x2 < g->width)
+                bmp[b] = blend(bmp[b+1], color, (1 - fraction(x2)) * 255);
+        }
+    }
+    free(edges);
+    free(segs.data);
 }
 Pg *pgNewBitmapCanvas(int width, int height) {
     Pg *g = calloc(1, sizeof *g);
     g->resize = bmp_resize;
     g->clear = bmp_clear;
     g->free = bmp_free;
-    g->triangle = bmp_triangle;
-    g->triangleStrip = bmp_triangleStrip;
+    g->fillPath = bmp_fillPath;
     pgIdentityMatrix(&g->ctm);
     g->resize(g, width, height);
     return g;
@@ -99,6 +176,13 @@ void pgFreeCanvas(Pg *g) {
 void pgResizeCanvas(Pg *g, int width, int height) {
     g->resize(g, width, height);
 }
+void pgIdentity(Pg *g) { pgIdentityMatrix(&g->ctm); }
+void pgTranslate(Pg *g, float x, float y) { pgTranslateMatrix(&g->ctm, x, y); }
+void pgScale(Pg *g, float x, float y) { pgScaleMatrix(&g->ctm, x, y); }
+void pgShear(Pg *g, float x, float y) { pgShearMatrix(&g->ctm, x, y); }
+void pgRotate(Pg *g, float rad) { pgRotateMatrix(&g->ctm, rad); }
+void pgMultiply(Pg *g, const PgMatrix * __restrict b) { pgMultiplyMatrix(&g->ctm, b); }
+
 void pgIdentityMatrix(PgMatrix *mat) {
     mat->a = 1;
     mat->b = 0;
@@ -159,4 +243,54 @@ PgPt *pgTransformPoints(const PgMatrix *ctm, PgPt *v, int n) {
     for (int i = 0; i < n; i++)
         v[i] = pgTransformPoint(ctm, v[i]);
     return v;
+}
+static int pathCapacity(int n) {
+    return n;
+}
+static void addPathPart(PgPath *path, int type, ...) {
+    if (type == PG_MOVE) {
+        if (path->nsubs >= pathCapacity(path->nsubs))
+            path->subs = realloc(path->subs, pathCapacity(path->nsubs + 1) * sizeof(int));
+        path->subs[path->nsubs++] = 0;
+    } else {
+        if (path->ntypes >= pathCapacity(path->ntypes))
+            path->types = realloc(path->types, pathCapacity(path->ntypes + 1) * sizeof(int));
+        path->types[path->ntypes++] = type;
+    }
+    
+    if (path->n >= pathCapacity(path->n))
+        path->data = realloc(path->data, pathCapacity(path->n + (type? type: 1)) * sizeof(PgPt));
+    
+    va_list ap;
+    va_start(ap, type);
+    for (int i = 0; i < (type? type: 1); i++) {
+        path->data[path->n++] = va_arg(ap, PgPt);
+        path->subs[path->nsubs - 1]++;
+    }
+    va_end(ap);
+}
+PgPath *pgNewPath() {
+    PgPath *path = calloc(1, sizeof *path);
+    return path;
+}
+void pgFreePath(PgPath *path) {
+    free(path->subs);
+    free(path->types);
+    free(path->data);
+    free(path);
+}
+void pgMove(PgPath *path, PgPt a) {
+    addPathPart(path, PG_MOVE, a);
+}
+void pgLine(PgPath *path, PgPt b) {
+    addPathPart(path, PG_LINE, b);
+}
+void pgQuad(PgPath *path, PgPt b, PgPt c) {
+    addPathPart(path, PG_QUAD, b, c);
+}
+void pgCubic(PgPath *path, PgPt b, PgPt c, PgPt d) {
+    addPathPart(path, PG_CUBIC, b, c, d);
+}
+void pgFillPath(Pg *g, PgPath *path, uint32_t color) {
+    g->fillPath(g, path, color);
 }

@@ -1,5 +1,13 @@
 typedef struct { float x, y; } PgPt;
 typedef struct { float a, b, c, d, e, f; } PgMatrix;
+typedef struct {
+    int n;
+    int nsubs;
+    int ntypes;
+    int *subs;
+    enum { PG_MOVE, PG_LINE, PG_QUAD, PG_CUBIC } *types;
+    PgPt *data;
+} PgPath;
 typedef struct Pg Pg;
 struct Pg {
     int width;
@@ -9,8 +17,7 @@ struct Pg {
     void (*resize)(Pg *pg, int width, int height);
     void (*clear)(Pg *pg, uint32_t color);
     void (*free)(Pg *pg);
-    void (*triangle)(Pg *g, PgPt a, PgPt b, PgPt c, uint32_t color);
-    void (*triangleStrip)(Pg *g, PgPt *v, int n, uint32_t color);
+    void (*fillPath)(Pg *g, PgPath *path, uint32_t color);
 };
 
 static PgPt pgPt(float x, float y) { return (PgPt){x,y}; }
@@ -20,6 +27,14 @@ static PgPt pgPt(float x, float y) { return (PgPt){x,y}; }
     void pgClearCanvas(Pg *g, uint32_t color);
     void pgFreeCanvas(Pg *g);
     void pgResizeCanvas(Pg *g, int width, int height);
+    // CANVAS MATRIX MANAGEMENT
+    void pgIdentity(Pg *g);
+    void pgTranslate(Pg *g, float x, float y);
+    void pgScale(Pg *g, float x, float y);
+    void pgShear(Pg *g, float x, float y);
+    void pgRotate(Pg *g, float rad);
+    void pgMultiply(Pg *g, const PgMatrix * __restrict b);
+    
 // MATRIX MANAGEMENT
     static PgMatrix PgIdentity = { 1, 0, 0, 1, 0, 0 };
     void pgIdentityMatrix(PgMatrix *mat);
@@ -30,3 +45,11 @@ static PgPt pgPt(float x, float y) { return (PgPt){x,y}; }
     void pgMultiplyMatrix(PgMatrix * __restrict a, const PgMatrix * __restrict b);
     PgPt pgTransformPoint(const PgMatrix *ctm, PgPt p);
     PgPt *pgTransformPoints(const PgMatrix *ctm, PgPt *v, int n);
+// Path management
+    PgPath *pgNewPath();
+    void pgFreePath(PgPath *path);
+    void pgMove(PgPath *path, PgPt a);
+    void pgLine(PgPath *path, PgPt b);
+    void pgQuad(PgPath *path, PgPt b, PgPt c);
+    void pgCubic(PgPath *path, PgPt b, PgPt c, PgPt d);
+    void pgFillPath(Pg *g, PgPath *path, uint32_t color);
