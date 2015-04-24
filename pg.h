@@ -1,4 +1,8 @@
 typedef struct { float x, y; } PgPt;
+typedef union {
+    struct { float x1, y1, x2, y2; };
+    struct { PgPt a, b; };
+} PgRect;
 typedef struct { float a, b, c, d, e, f; } PgMatrix;
 typedef struct {
     int n;
@@ -13,6 +17,7 @@ struct Pg {
     int width;
     int height;
     PgMatrix ctm;
+    PgRect clip;
     uint32_t *bmp;
     void (*resize)(Pg *pg, int width, int height);
     void (*clear)(Pg *pg, uint32_t color);
@@ -22,6 +27,7 @@ struct Pg {
 };
 
 static PgPt pgPt(float x, float y) { return (PgPt){x,y}; }
+static PgRect pgRect(PgPt a, PgPt b) { return (PgRect){ .a = a, .b = b }; }
 
 // CANVAS MANAGEMENT
     Pg *pgNewBitmapCanvas(int width, int height);

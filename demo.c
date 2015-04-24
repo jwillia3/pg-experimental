@@ -208,6 +208,10 @@ void repaint() {
     pgTranslate(G, G->width / 2.0f, G->height / 2.0f);
 
     setup();
+    
+//    G->clip.y1 = 400;
+//    G->clip.y2 = 500;
+    G->clip = (PgRect){ 600, 400, 800, 500 };
     for (int i = 0; SvgPath[i]; i++)
         pgStrokePath(G, SvgPath[i], 10.0f, ~fg);
     for (int i = 0; SvgPath[i]; i++)

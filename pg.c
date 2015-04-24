@@ -94,6 +94,7 @@ static void bmp_resize(Pg *g, int width, int height) {
     free(g->bmp);
     g->width = width;
     g->height = height;
+    g->clip = (PgRect){ 0, 0, width, height };
     g->bmp = malloc(width * height * 4);
 }
 static segs_t bmp_segmentPath(PgPath *path, PgMatrix ctm, bool close) {
@@ -130,6 +131,7 @@ static void bmp_fillPath(Pg *g, PgPath *path, uint32_t color) {
     float maxY = segs.data[0].b.y;
     for (seg_t *seg = segs.data + 1; seg < segs.data + segs.n; seg++)
         maxY = max(maxY, seg->b.y);
+    maxY = clamp(g->clip.y1, maxY, g->clip.y2);
     
     // Scan through lines filling between edge
     typedef struct { float x, m, y2; } edge_t;
@@ -137,7 +139,7 @@ static void bmp_fillPath(Pg *g, PgPath *path, uint32_t color) {
     int nedges = 0;
     seg_t *seg = segs.data;
     seg_t *endSeg = seg + segs.n;
-    for (int scanY = max(0, segs.data[0].a.y); scanY < min(maxY, g->height); scanY++) {
+    for (int scanY = max(g->clip.y1, segs.data[0].a.y); scanY < maxY; scanY++) {
         float y = scanY + 0.5f;
         edge_t *endEdge = edges + nedges;
         nedges = 0;
@@ -163,15 +165,15 @@ static void bmp_fillPath(Pg *g, PgPath *path, uint32_t color) {
         for (edge_t *e = edges + 1; e < edges + nedges; e += 2) {
             float x1 = e[-1].x;
             float x2 = e[0].x;
-            if (x2 < 0 || x1 >= g->width) continue;
-            int a = max(0, x1);
-            int b = min(x2, g->width - 1);
-            if (x1 >= 0) {
+            if (x2 < g->clip.x1 || x1 >= g->clip.x2) continue;
+            int a = clamp(g->clip.x1, x1, g->clip.x2);
+            int b = clamp(g->clip.x1, x2, g->clip.x2);
+            if (x1 >= g->clip.x1) {
                 bmp[a] = blend(bmp[a], color, fraction(x1) * 255);
                 a++;
             }
             for (int x = a; x < b; x++) bmp[x] = color;
-            if (x2 < g->width)
+            if (x2 < g->clip.x2)
                 bmp[b] = blend(bmp[b+1], color, (1 - fraction(x2)) * 255);
         }
     }
