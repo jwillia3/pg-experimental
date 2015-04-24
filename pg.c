@@ -296,27 +296,27 @@ PgPt *pgTransformPoints(const PgMatrix *ctm, PgPt *v, int n) {
         v[i] = pgTransformPoint(ctm, v[i]);
     return v;
 }
-static int pathCapacity(int n) {
-    return n;
-}
 static void addPathPart(PgPath *path, int type, ...) {
     if (type == PG_MOVE) {
-        if (path->nsubs >= pathCapacity(path->nsubs))
-            path->subs = realloc(path->subs, pathCapacity(path->nsubs + 1) * sizeof(int));
+        if (path->nsubs >= path->subCap)
+            path->subCap = max(path->subCap * 2, 4),
+            path->subs = realloc(path->subs, path->subCap * sizeof(int));
         path->subs[path->nsubs++] = 0;
     } else {
-        if (path->ntypes >= pathCapacity(path->ntypes))
-            path->types = realloc(path->types, pathCapacity(path->ntypes + 1) * sizeof(int));
+        if (path->ntypes >= path->typeCap)
+            path->typeCap = max(path->typeCap * 2, 8),
+            path->types = realloc(path->types, path->typeCap * sizeof(int));
         path->types[path->ntypes++] = type;
     }
     
-    if (path->n >= pathCapacity(path->n))
-        path->data = realloc(path->data, pathCapacity(path->n + (type? type: 1)) * sizeof(PgPt));
+    if (path->npoints + max(type, 1) >= path->pointCap)
+        path->pointCap = max(path->pointCap * 2, 32),
+        path->data = realloc(path->data, path->pointCap * sizeof(PgPt));
     
     va_list ap;
     va_start(ap, type);
-    for (int i = 0; i < (type? type: 1); i++) {
-        path->data[path->n++] = va_arg(ap, PgPt);
+    for (int i = 0; i < max(type, 1); i++) {
+        path->data[path->npoints++] = va_arg(ap, PgPt);
         path->subs[path->nsubs - 1]++;
     }
     va_end(ap);
@@ -326,7 +326,7 @@ PgPath *pgNewPath() {
     return path;
 }
 void pgClearPath(PgPath *path) {
-    path->n = 0;
+    path->npoints = 0;
     path->nsubs = 0;
     path->ntypes = 0;
 }

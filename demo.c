@@ -216,7 +216,7 @@ void repaintClient() {
     setup();
     
     for (int i = 0; SvgPath[i]; i++)
-        pgStrokePath(G, SvgPath[i], 10.0f, ~fg);
+        pgStrokePath(G, SvgPath[i], 20.0f, ~fg);
     for (int i = 0; SvgPath[i]; i++)
         pgFillPath(G, SvgPath[i], fg);
     

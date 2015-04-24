@@ -5,9 +5,9 @@ typedef union {
 } PgRect;
 typedef struct { float a, b, c, d, e, f; } PgMatrix;
 typedef struct {
-    int n;
-    int nsubs;
-    int ntypes;
+    int npoints, pointCap;
+    int nsubs, subCap;
+    int ntypes, typeCap;
     int *subs;
     enum { PG_MOVE, PG_LINE, PG_QUAD, PG_CUBIC } *types;
     PgPt *data;
