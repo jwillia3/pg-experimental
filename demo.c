@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <windows.h>
+#include <windowsx.h>
 #include "pg.h"
 #include "demo.h"
 #pragma comment(lib, "gdi32")
@@ -168,6 +169,11 @@ PgPath *pgGetSvgPath(const char *svg) {
     }
     return path;
 }
+void pgFillSvgPath(Pg *g, const char *svg, uint32_t color) {
+    PgPath *path = pgGetSvgPath(svg);
+    pgFillPath(g, path, color);
+    pgFreePath(path);
+}
 
 void save() {
     #pragma pack(push)
@@ -198,7 +204,7 @@ void setup() {
     for (int i = 0; TestSVG[i]; i++)
         SvgPath[i] = pgGetSvgPath(TestSVG[i]);
 }
-void repaint() {
+void repaintClient() {
     static int oldFps;
     
     pgClearCanvas(G, bg);
@@ -209,17 +215,16 @@ void repaint() {
 
     setup();
     
-//    G->clip.y1 = 400;
-//    G->clip.y2 = 500;
-    G->clip = (PgRect){ 600, 400, 800, 500 };
     for (int i = 0; SvgPath[i]; i++)
         pgStrokePath(G, SvgPath[i], 10.0f, ~fg);
     for (int i = 0; SvgPath[i]; i++)
         pgFillPath(G, SvgPath[i], fg);
-        
+    
+    
+    
 //    pgIdentity(G);
 //    pgRotate(G, tick / 180.0f * 8.0f);
-//    pgTranslate(G, G->width / 2.0f, G->height / 2.0f);
+////    pgTranslate(G, G->width / 2.0f, G->height / 2.0f);
 //    pgStrokePath(G, pgGetSvgPath(
 //        "M0,0"
 //        " v100"
@@ -231,12 +236,47 @@ void repaint() {
     if (fps) SetTimer(W, 0, 1000 / fps, NULL);
     oldFps = fps;
 }
-void create() {
-    G = pgNewGdiCanvas(0, 0);
-}
-void resize(int width, int height) {
-    pgResizeCanvas(G, width, height);
-    repaint();
+void repaint() {
+    pgIdentity(G);
+    {
+        PgPath *path = pgNewPath();
+        pgMove(path, pgPt(0, 0));
+        pgLine(path, pgPt(G->width, 0));
+        pgLine(path, pgPt(G->width, 31));
+        pgLine(path, pgPt(0, 31));
+        pgFillPath(G, path, 0xaa5533);
+        
+        pgClearPath(path);
+        pgTranslate(G, G->width - 24, 8);
+        pgMove(path, pgPt(0, 0));
+        pgLine(path, pgPt(16, 16));
+        pgMove(path, pgPt(0, 16));
+        pgLine(path, pgPt(16, 0));
+        pgStrokePath(G, path, 5.0f, 0x444444);
+        
+        pgClearPath(path);
+        pgTranslate(G, -32, 0);
+        pgMove(path, pgPt(0, 0));
+        pgLine(path, pgPt(16, 0));
+        pgLine(path, pgPt(16, 16));
+        pgLine(path, pgPt(0, 16));
+        pgLine(path, pgPt(0, 0));
+        pgStrokePath(G, path, 5.0f, 0x444444);
+        
+        pgClearPath(path);
+        pgTranslate(G, -32, 0);
+        pgMove(path, pgPt(0, 16));
+        pgLine(path, pgPt(16, 16));
+        pgStrokePath(G, path, 5.0f, 0x444444);
+        
+        pgFreePath(path);
+    }
+    G->height -= 32;
+    G->bmp += G->width * 32;
+    pgIdentity(G);
+    repaintClient();
+    G->height += 32;
+    G->bmp -= G->width * 32;
 }
 
 LRESULT WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
@@ -265,6 +305,33 @@ LRESULT WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
         if (wparam == VK_LEFT && tick > 0) { tick--; repaint(); InvalidateRect(hwnd, NULL, false); }
         if (wparam == VK_RIGHT) { tick++; repaint(); InvalidateRect(hwnd, NULL, false); }
         return 0;
+    
+    case WM_NCHITTEST:
+        {
+        RECT r;
+        GetWindowRect(hwnd, &r);
+        int x = LOWORD(lparam) - r.left, y = HIWORD(lparam) - r.top;
+        
+        if (y < 32) {
+            if (x >= G->width - 32) return HTCLOSE;
+            if (x >= G->width - 64) return HTMAXBUTTON;
+            if (x >= G->width - 96) return HTMINBUTTON;
+            return HTCAPTION;
+        }
+        
+        
+        if (abs(0 - x) < 2)
+            return abs(0 - y) < 2? HTTOPLEFT:
+                abs(G->height - y) < 2? HTBOTTOMLEFT:
+                HTLEFT;
+        if (abs(G->width - x) < 2)
+            return abs(0 - y) < 2? HTTOPRIGHT:
+                abs(G->height - y) < 2? HTBOTTOMRIGHT:
+                HTRIGHT;
+                
+        
+        }
+        return HTCLIENT;
         
     case WM_SIZE:
         pgResizeCanvas(G, LOWORD(lparam), HIWORD(lparam));
@@ -277,7 +344,7 @@ LRESULT WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
         return 0;
     case WM_CREATE:
         W = hwnd;
-        create();
+        G = pgNewGdiCanvas(0, 0);
         return 0;
     case WM_ERASEBKGND:
         return 0;
@@ -304,11 +371,9 @@ int WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
         NULL, L"GenericWindow" };
     RegisterClass(&wc);
     
-    RECT r = { 0, 0, 1280, 1024 };
-    AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, false);
     CreateWindow(L"GenericWindow", L"Window",
-        WS_OVERLAPPEDWINDOW|WS_VISIBLE,
-        CW_USEDEFAULT, CW_USEDEFAULT, r.right-r.left, r.bottom-r.top,
+        WS_POPUPWINDOW|WS_VISIBLE,
+        CW_USEDEFAULT, CW_USEDEFAULT, 1024, 800,
         NULL, NULL, GetModuleHandle(NULL), NULL);
     
     MSG msg;

@@ -325,6 +325,11 @@ PgPath *pgNewPath() {
     PgPath *path = calloc(1, sizeof *path);
     return path;
 }
+void pgClearPath(PgPath *path) {
+    path->n = 0;
+    path->nsubs = 0;
+    path->ntypes = 0;
+}
 void pgFreePath(PgPath *path) {
     free(path->subs);
     free(path->types);

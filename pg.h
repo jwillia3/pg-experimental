@@ -55,6 +55,7 @@ static PgRect pgRect(PgPt a, PgPt b) { return (PgRect){ .a = a, .b = b }; }
 // Path management
     PgPath *pgNewPath();
     void pgFreePath(PgPath *path);
+    void pgClearPath(PgPath *path);
     void pgMove(PgPath *path, PgPt a);
     void pgLine(PgPath *path, PgPt b);
     void pgQuad(PgPath *path, PgPt b, PgPt c);
