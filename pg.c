@@ -15,6 +15,8 @@ static float min(float a, float b) { return a < b? a: b; }
 static float max(float a, float b) { return a > b? a: b; }
 static float clamp(float a, float b, float c) { return min(max(a, b), c); }
 static float fraction(float a) { return a - floor(a); }
+static float distance(PgPt p) { return sqrtf(p.x * p.x + p.y * p.y); }
+static PgPt midpoint(PgPt a, PgPt b) { return pgPt((a.x + b.x) / 2.0f, (a.y + b.y) / 2.0f); }
 
 typedef struct { float x, m, y2; } edge_t;
 typedef struct { PgPt a, b; float m; } seg_t;
@@ -26,20 +28,34 @@ static void addSeg(segs_t *segs, PgPt a, PgPt b) {
     }
     segs->data[segs->n++] = (seg_t) { a, b };
 }
-static float Flatness = 0.0625f;
+static float Flatness = 1.01f;
 static void segmentQuad(segs_t *segs, PgPt a, PgPt b, PgPt c) {
-    PgPt p = a, q;
-    for (float i = 0, j = 1.0f; i <= 1.0f; p = q, j = 1.0f - (i += Flatness))
-        addSeg(segs, p, q = pgPt(
-            j*j*a.x + 2*j*i*b.x + i*i*c.x,
-            j*j*a.y + 2*j*i*b.y + i*i*c.y));
+    float ab = distance(pgPt(a.x - b.x, a.y - b.y));
+    float bc = distance(pgPt(b.x - c.x, b.y - c.y));
+    float ac = distance(pgPt(a.x - c.x, a.y - c.y));
+    if (ab + bc + ac >= Flatness * ac) {
+        PgPt ab = midpoint(a, b);
+        PgPt bc = midpoint(b, c);
+        PgPt abc = midpoint(ab, bc);
+        segmentQuad(segs, a, ab, abc);
+        segmentQuad(segs, abc, bc, c);
+    } else addSeg(segs, a, c);
 }
 static void segmentCubic(segs_t *segs, PgPt a, PgPt b, PgPt c, PgPt d) {
-    PgPt p = a, q;
-    for (float i = 0, j = 1.0f; i <= 1.0f; p = q, j = 1.0f - (i += Flatness))
-        addSeg(segs, p, q = pgPt(
-            j*j*j*a.x + 3*j*j*i*b.x + 3*j*i*i*c.x + i*i*i*d.x,
-            j*j*j*a.y + 3*j*j*i*b.y + 3*j*i*i*c.y + i*i*i*d.y));
+    float ab = distance(pgPt(a.x - b.x, a.y - b.y));
+    float bc = distance(pgPt(b.x - c.x, b.y - c.y));
+    float cd = distance(pgPt(c.x - d.x, c.y - d.y));
+    float ad = distance(pgPt(a.x - d.x, a.y - d.y));
+    if (ab + bc + cd >= Flatness * ad) {
+        PgPt ab = midpoint(a, b);
+        PgPt bc = midpoint(b, c);
+        PgPt cd = midpoint(c, d);
+        PgPt abc = midpoint(ab, bc);
+        PgPt bcd = midpoint(bc, cd);
+        PgPt abcd = midpoint(abc, bcd);
+        segmentCubic(segs, a, ab, abc, abcd);
+        segmentCubic(segs, abcd, bcd, cd, d);
+    } else addSeg(segs, a, d);
 }
 static int sortSegsDescending(const void *x, const void *y) {
     const seg_t *a = x;

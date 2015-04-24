@@ -192,6 +192,12 @@ void save() {
 
 int fps;
 int tick;
+PgPath *SvgPath[sizeof TestSVG / sizeof *TestSVG];
+void setup() {
+    if (SvgPath[0]) return;
+    for (int i = 0; TestSVG[i]; i++)
+        SvgPath[i] = pgGetSvgPath(TestSVG[i]);
+}
 void repaint() {
     static int oldFps;
     
@@ -201,17 +207,12 @@ void repaint() {
     pgRotate(G, tick / 180.0f * 8.0f);
     pgTranslate(G, G->width / 2.0f, G->height / 2.0f);
 
-    for (int i = 0; TestSVG[i]; i++) {
-        PgPath *path = pgGetSvgPath(TestSVG[i]);
-        pgStrokePath(G, path, 20.0f, ~fg);
-        pgFreePath(path);
-    }
-    for (int i = 0; TestSVG[i]; i++) {
-        PgPath *path = pgGetSvgPath(TestSVG[i]);
-        pgFillPath(G, path, fg);
-        pgFreePath(path);
-    }
-
+    setup();
+    for (int i = 0; SvgPath[i]; i++)
+        pgStrokePath(G, SvgPath[i], 10.0f, ~fg);
+    for (int i = 0; SvgPath[i]; i++)
+        pgFillPath(G, SvgPath[i], fg);
+        
 //    pgIdentity(G);
 //    pgRotate(G, tick / 180.0f * 8.0f);
 //    pgTranslate(G, G->width / 2.0f, G->height / 2.0f);
@@ -241,7 +242,10 @@ LRESULT WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
         BeginPaint(hwnd, &ps);
         HDC cdc = CreateCompatibleDC(ps.hdc);
         SelectObject(cdc, ((GdiPg*)G)->dib);
-        BitBlt(ps.hdc, 0, 0, G->width, G->height, cdc, 0, 0, SRCCOPY);
+        BitBlt(ps.hdc,
+            ps.rcPaint.left, ps.rcPaint.top,
+            ps.rcPaint.right, ps.rcPaint.bottom, 
+            cdc, ps.rcPaint.left, ps.rcPaint.top, SRCCOPY);
         DeleteDC(cdc);
         EndPaint(hwnd, &ps);
         return 0;
@@ -284,8 +288,12 @@ int WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
     HINSTANCE kernel32 = LoadLibrary(L"kernel32.dll");
     BOOL (*GetProcessUserModeExceptionPolicy)(DWORD*) = kernel32? (void*)GetProcAddress(kernel32, "GetProcessUserModeExceptionPolicy"): 0;
     BOOL (*SetProcessUserModeExceptionPolicy)(DWORD) = kernel32? (void*)GetProcAddress(kernel32, "SetProcessUserModeExceptionPolicy"): 0;
-    if (!GetProcessUserModeExceptionPolicy)
-        FatalAppExit(0, L"XXX");
+    DWORD dwFlags;
+    if (GetProcessUserModeExceptionPolicy) {
+        GetProcessUserModeExceptionPolicy(&dwFlags);
+        SetProcessUserModeExceptionPolicy(dwFlags & ~1);
+    }
+        
     WNDCLASS wc = { CS_HREDRAW|CS_VREDRAW, WndProc, 0, 0,
         GetModuleHandle(NULL), LoadIcon(NULL, IDI_APPLICATION),
         LoadCursor(NULL, IDC_ARROW), (HBRUSH)(COLOR_WINDOW + 1),
