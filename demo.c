@@ -179,6 +179,11 @@ void pgFillSvgPath(Pg *g, const char *svg, uint32_t color) {
     pgFillPath(g, path, color);
     pgFreePath(path);
 }
+void pgStrokeSvgPath(Pg *g, const char *svg, float width, uint32_t color) {
+    PgPath *path = pgGetSvgPath(svg);
+    pgStrokePath(g, path, width, color);
+    pgFreePath(path);
+}
 
 void save() {
     #pragma pack(push)
@@ -229,10 +234,11 @@ void repaintClient() {
 
     setup();
     
-    pgScaleFont(Font, 24, 0);
+    float pt = 24;
+    pgScaleFont(Font, pt, 0);
     wchar_t *text = L"The quick brown fox jumped over the lazy dog.";
     float w = pgGetStringWidth(Font, text, -1);
-    pgTranslate(G, -w / 2.0f, -12 / 2.0f);
+    pgTranslate(G, -w / 2.0f, -pt / 2.0f);
     pgRotate(G, tick / 180.0f * 8.0f);
     pgTranslate(G, G->width / 2.0f, G->height / 2.0f);
     pgFillString(G, Font, 0, 0, text, -1, fg);
@@ -247,12 +253,9 @@ void repaintClient() {
 //    pgIdentity(G);
 //    pgRotate(G, tick / 180.0f * 8.0f);
 //    pgTranslate(G, G->width / 2.0f, G->height / 2.0f);
-//    pgStrokePath(G, pgGetSvgPath(
-//        "M0,0"
-//        " v100"
-//        ), 20.0f, fg);
+//    pgStrokeSvgPath(G, "M0,0 v100", 20.0f, fg);
 
-//    fps = 60;
+    fps = 60;
     
     if (!fps && oldFps) KillTimer(W, 0);
     if (fps) SetTimer(W, 0, 1000 / fps, NULL);
@@ -260,39 +263,39 @@ void repaintClient() {
 }
 void repaint() {
     pgIdentity(G);
-    {
-        PgPath *path = pgNewPath();
-        pgMove(path, pgPt(0, 0));
-        pgLine(path, pgPt(G->width, 0));
-        pgLine(path, pgPt(G->width, 31));
-        pgLine(path, pgPt(0, 31));
-        pgFillPath(G, path, 0xaa5533);
-        
-        pgClearPath(path);
-        pgTranslate(G, G->width - 24, 8);
-        pgMove(path, pgPt(0, 0));
-        pgLine(path, pgPt(16, 16));
-        pgMove(path, pgPt(0, 16));
-        pgLine(path, pgPt(16, 0));
-        pgStrokePath(G, path, 5.0f, 0x444444);
-        
-        pgClearPath(path);
-        pgTranslate(G, -32, 0);
-        pgMove(path, pgPt(0, 0));
-        pgLine(path, pgPt(16, 0));
-        pgLine(path, pgPt(16, 16));
-        pgLine(path, pgPt(0, 16));
-        pgLine(path, pgPt(0, 0));
-        pgStrokePath(G, path, 5.0f, 0x444444);
-        
-        pgClearPath(path);
-        pgTranslate(G, -32, 0);
-        pgMove(path, pgPt(0, 16));
-        pgLine(path, pgPt(16, 16));
-        pgStrokePath(G, path, 5.0f, 0x444444);
-        
-        pgFreePath(path);
-    }
+//    {
+//        PgPath *path = pgNewPath();
+//        pgMove(path, pgPt(0, 0));
+//        pgLine(path, pgPt(G->width, 0));
+//        pgLine(path, pgPt(G->width, 31));
+//        pgLine(path, pgPt(0, 31));
+//        pgFillPath(G, path, 0xaa5533);
+//        
+//        pgClearPath(path);
+//        pgTranslate(G, G->width - 24, 8);
+//        pgMove(path, pgPt(0, 0));
+//        pgLine(path, pgPt(16, 16));
+//        pgMove(path, pgPt(0, 16));
+//        pgLine(path, pgPt(16, 0));
+//        pgStrokePath(G, path, 5.0f, 0x444444);
+//        
+//        pgClearPath(path);
+//        pgTranslate(G, -32, 0);
+//        pgMove(path, pgPt(0, 0));
+//        pgLine(path, pgPt(16, 0));
+//        pgLine(path, pgPt(16, 16));
+//        pgLine(path, pgPt(0, 16));
+//        pgLine(path, pgPt(0, 0));
+//        pgStrokePath(G, path, 5.0f, 0x444444);
+//        
+//        pgClearPath(path);
+//        pgTranslate(G, -32, 0);
+//        pgMove(path, pgPt(0, 16));
+//        pgLine(path, pgPt(16, 16));
+//        pgStrokePath(G, path, 5.0f, 0x444444);
+//        
+//        pgFreePath(path);
+//    }
     G->height -= 32;
     G->bmp += G->width * 32;
     G->clip.y2 -= 32;
