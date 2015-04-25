@@ -14,11 +14,15 @@
 #pragma comment(lib, "gdi32")
 #pragma comment(lib, "user32")
 #pragma comment(lib, "pg")
+#include "platform.h"
 
-uint32_t bg = 0x404040;
-uint32_t fg = 0xf09050;
+//uint32_t bg = 0x404040;
+//uint32_t fg = 0xf09050;
+uint32_t bg = 0xd0d0c0;
+uint32_t fg = 0x904040;
 HWND W;
 Pg  *G;
+PgFont *Font;
 
 typedef struct {
     Pg g;
@@ -92,6 +96,7 @@ PgPath *pgGetSvgPath(const char *svg) {
         case 'Z':
         case 'z':
             cur = start;
+            pgClosePath(path);
             break;
         case 'L':
             cur = pgPt(a[0], a[1]);
@@ -203,34 +208,51 @@ void setup() {
     if (SvgPath[0]) return;
     for (int i = 0; TestSVG[i]; i++)
         SvgPath[i] = pgGetSvgPath(TestSVG[i]);
+    
+    if (!Font) {
+        void *host;
+        Font = (PgFont*)pgLoadOpenTypeFont(
+//            _pgMapFile(&host, L"C:/Windows/Fonts/ariblk.ttf"),
+            _pgMapFile(&host, L"C:/Windows/Fonts/arial.ttf"),
+//            _pgMapFile(&host, L"C:/Windows/Fonts/cour.ttf"),
+            0);
+    }
 }
 void repaintClient() {
     static int oldFps;
     
     pgClearCanvas(G, bg);
     pgIdentity(G);
-    pgTranslate(G, -200, -250);
-    pgRotate(G, tick / 180.0f * 8.0f);
-    pgTranslate(G, G->width / 2.0f, G->height / 2.0f);
+//    pgTranslate(G, -200, -250);
+//    pgRotate(G, tick / 180.0f * 8.0f);
+//    pgTranslate(G, G->width / 2.0f, G->height / 2.0f);
 
     setup();
     
-    for (int i = 0; SvgPath[i]; i++)
-        pgStrokePath(G, SvgPath[i], 20.0f, ~fg);
-    for (int i = 0; SvgPath[i]; i++)
-        pgFillPath(G, SvgPath[i], fg);
+    pgScaleFont(Font, 24, 0);
+    wchar_t *text = L"The quick brown fox jumped over the lazy dog.";
+    float w = pgGetStringWidth(Font, text, -1);
+    pgTranslate(G, -w / 2.0f, -12 / 2.0f);
+    pgRotate(G, tick / 180.0f * 8.0f);
+    pgTranslate(G, G->width / 2.0f, G->height / 2.0f);
+    pgFillString(G, Font, 0, 0, text, -1, fg);
+    
+//    for (int i = 0; SvgPath[i]; i++)
+//        pgStrokePath(G, SvgPath[i], 20.0f, ~fg);
+//    for (int i = 0; SvgPath[i]; i++)
+//        pgFillPath(G, SvgPath[i], fg);
     
     
     
 //    pgIdentity(G);
 //    pgRotate(G, tick / 180.0f * 8.0f);
-////    pgTranslate(G, G->width / 2.0f, G->height / 2.0f);
+//    pgTranslate(G, G->width / 2.0f, G->height / 2.0f);
 //    pgStrokePath(G, pgGetSvgPath(
 //        "M0,0"
 //        " v100"
 //        ), 20.0f, fg);
-//    fps = 10;
-    fps = 60;
+
+//    fps = 60;
     
     if (!fps && oldFps) KillTimer(W, 0);
     if (fps) SetTimer(W, 0, 1000 / fps, NULL);
@@ -273,8 +295,10 @@ void repaint() {
     }
     G->height -= 32;
     G->bmp += G->width * 32;
+    G->clip.y2 -= 32;
     pgIdentity(G);
     repaintClient();
+    G->clip.y2 += 32;
     G->height += 32;
     G->bmp -= G->width * 32;
 }
@@ -383,4 +407,7 @@ int WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
     }
     return msg.wParam;
 }
-int main() { return WinMain(0,0,0,0); }
+
+int main() {
+    return WinMain(0,0,0,0);
+}

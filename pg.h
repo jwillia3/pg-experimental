@@ -25,6 +25,32 @@ struct Pg {
     void (*fillPath)(Pg *g, PgPath *path, uint32_t color);
     void (*strokePath)(Pg *g, PgPath *path, float width, uint32_t color);
 };
+typedef struct PgFont PgFont;
+struct PgFont {
+    const void *file;
+    void *host;
+    PgMatrix ctm;
+    float em, xHeight, capHeight, ascender, descender, lineGap;
+    int weight;
+    bool isItalic;
+    const wchar_t *family, name;
+    
+    void (*free)(PgFont *font);
+    PgPath *(*getGlyphPath)(PgFont *font, PgPath *path, int glyph);
+    int (*getGlyph)(PgFont *font, int glyph);
+    float (*getGlyphWidth)(PgFont *font, int glyph);
+};
+typedef struct {
+    PgFont _;
+    const int16_t *hmtx;
+    const void *glyf;
+    const void *loca;
+    uint16_t *cmap;
+    bool longLoca;
+    int nhmtx;
+    int nglyphs;
+    int nfonts;
+} PgOpenTypeFont;
 
 static PgPt pgPt(float x, float y) { return (PgPt){x,y}; }
 static PgRect pgRect(PgPt a, PgPt b) { return (PgRect){ .a = a, .b = b }; }
@@ -50,8 +76,8 @@ static PgRect pgRect(PgPt a, PgPt b) { return (PgRect){ .a = a, .b = b }; }
     void pgShearMatrix(PgMatrix *mat, float x, float y);
     void pgRotateMatrix(PgMatrix *mat, float rad);
     void pgMultiplyMatrix(PgMatrix * __restrict a, const PgMatrix * __restrict b);
-    PgPt pgTransformPoint(const PgMatrix *ctm, PgPt p);
-    PgPt *pgTransformPoints(const PgMatrix *ctm, PgPt *v, int n);
+    PgPt pgTransformPoint(PgMatrix ctm, PgPt p);
+    PgPt *pgTransformPoints(PgMatrix ctm, PgPt *v, int n);
 // Path management
     PgPath *pgNewPath();
     void pgFreePath(PgPath *path);
@@ -60,5 +86,19 @@ static PgRect pgRect(PgPt a, PgPt b) { return (PgRect){ .a = a, .b = b }; }
     void pgLine(PgPath *path, PgPt b);
     void pgQuad(PgPath *path, PgPt b, PgPt c);
     void pgCubic(PgPath *path, PgPt b, PgPt c, PgPt d);
+    void pgClosePath(PgPath *path);
     void pgFillPath(Pg *g, PgPath *path, uint32_t color);
     void pgStrokePath(Pg *g, PgPath *path, float width, uint32_t color);
+// Fonts
+    PgOpenTypeFont *pgLoadOpenTypeFontHeader(const void *file, int fontIndex);
+    PgOpenTypeFont *pgLoadOpenTypeFont(const void *file, int fontIndex);
+    int pgGetGlyph(PgFont *font, int c);
+    void pgFreeFont(PgFont *font);
+    void pgScaleFont(PgFont *font, float x, float y);
+    PgPath *pgGetGlyphPath(PgFont *font, PgPath *path, int glyph);
+    PgPath *pgGetCharPath(PgFont *font, PgPath *path, int c);
+    float pgFillChar(Pg *g, PgFont *font, float x, float y, int c, uint32_t color);
+    float pgFillString(Pg *g, PgFont *font, float x, float y, const wchar_t *text, int len, uint32_t color);
+    float pgGetCharWidth(PgFont *font, int c);
+    float pgGetGlyphWidth(PgFont *font, int c);
+    float pgGetStringWidth(PgFont *font, wchar_t *text, int len);

@@ -1,3 +1,4 @@
+#define BEZIER_LIMIT 5
 #include <assert.h>
 #include <float.h>
 #include <math.h>
@@ -8,15 +9,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include "pg.h"
-
-#undef min
-#undef max
-static float min(float a, float b) { return a < b? a: b; }
-static float max(float a, float b) { return a > b? a: b; }
-static float clamp(float a, float b, float c) { return min(max(a, b), c); }
-static float fraction(float a) { return a - floor(a); }
-static float distance(PgPt p) { return sqrtf(p.x * p.x + p.y * p.y); }
-static PgPt midpoint(PgPt a, PgPt b) { return pgPt((a.x + b.x) / 2.0f, (a.y + b.y) / 2.0f); }
+#include "platform.h"
+#include "util.h"
 
 typedef struct { float x, m, y2; } edge_t;
 typedef struct { PgPt a, b; float m; } seg_t;
@@ -29,7 +23,11 @@ static void addSeg(segs_t *segs, PgPt a, PgPt b) {
     segs->data[segs->n++] = (seg_t) { a, b };
 }
 static float Flatness = 1.01f;
-static void segmentQuad(segs_t *segs, PgPt a, PgPt b, PgPt c) {
+static void segmentQuad(segs_t *segs, PgPt a, PgPt b, PgPt c, int n) {
+    if (!n) {
+        addSeg(segs, a, c);
+        return;
+    }
     float ab = distance(pgPt(a.x - b.x, a.y - b.y));
     float bc = distance(pgPt(b.x - c.x, b.y - c.y));
     float ac = distance(pgPt(a.x - c.x, a.y - c.y));
@@ -37,11 +35,15 @@ static void segmentQuad(segs_t *segs, PgPt a, PgPt b, PgPt c) {
         PgPt ab = midpoint(a, b);
         PgPt bc = midpoint(b, c);
         PgPt abc = midpoint(ab, bc);
-        segmentQuad(segs, a, ab, abc);
-        segmentQuad(segs, abc, bc, c);
+        segmentQuad(segs, a, ab, abc, n - 1);
+        segmentQuad(segs, abc, bc, c, n - 1);
     } else addSeg(segs, a, c);
 }
-static void segmentCubic(segs_t *segs, PgPt a, PgPt b, PgPt c, PgPt d) {
+static void segmentCubic(segs_t *segs, PgPt a, PgPt b, PgPt c, PgPt d, int n) {
+    if (!n) {
+        addSeg(segs, a, d);
+        return;
+    }
     float ab = distance(pgPt(a.x - b.x, a.y - b.y));
     float bc = distance(pgPt(b.x - c.x, b.y - c.y));
     float cd = distance(pgPt(c.x - d.x, c.y - d.y));
@@ -53,8 +55,8 @@ static void segmentCubic(segs_t *segs, PgPt a, PgPt b, PgPt c, PgPt d) {
         PgPt abc = midpoint(ab, bc);
         PgPt bcd = midpoint(bc, cd);
         PgPt abcd = midpoint(abc, bcd);
-        segmentCubic(segs, a, ab, abc, abcd);
-        segmentCubic(segs, abcd, bcd, cd, d);
+        segmentCubic(segs, a, ab, abc, abcd, n - 1);
+        segmentCubic(segs, abcd, bcd, cd, d, n - 1);
     } else addSeg(segs, a, d);
 }
 static int sortSegsDescending(const void *x, const void *y) {
@@ -106,16 +108,16 @@ static segs_t bmp_segmentPath(PgPath *path, PgMatrix ctm, bool close) {
         PgPt a = *p++, first = a;
         for (PgPt *end = p + *sub - 1; p < end; a = (p += *t++)[-1])
             if (*t == PG_LINE) addSeg(&segs, a, p[0]);
-            else if (*t == PG_QUAD) segmentQuad(&segs, a, p[0], p[1]);
-            else if (*t == PG_CUBIC) segmentCubic(&segs, a, p[0], p[1], p[2]);
+            else if (*t == PG_QUAD) segmentQuad(&segs, a, p[0], p[1], BEZIER_LIMIT);
+            else if (*t == PG_CUBIC) segmentCubic(&segs, a, p[0], p[1], p[2], BEZIER_LIMIT);
         if (close)
             addSeg(&segs, a, first);
     }
     // Transform points and make sure point A is the above B
     // Then sort them so that A's that Y's are first; for ties, low X's first
     for (int i = 0; i < segs.n; i++) {
-        PgPt a = pgTransformPoint(&ctm, segs.data[i].a);
-        PgPt b = pgTransformPoint(&ctm, segs.data[i].b);
+        PgPt a = pgTransformPoint(ctm, segs.data[i].a);
+        PgPt b = pgTransformPoint(ctm, segs.data[i].b);
         float m = a.y < b.y?
             (b.x - a.x) / (b.y - a.y):
             a.y == b.y? 0: (a.x - b.x) / (a.y - b.y);
@@ -285,13 +287,13 @@ void pgMultiplyMatrix(PgMatrix * __restrict a, const PgMatrix * __restrict b) {
     a->d = old.c * b->b + old.d * b->d;
     a->f = old.e * b->b + old.f * b->d + b->f;
 }
-PgPt pgTransformPoint(const PgMatrix *ctm, PgPt p) {
+PgPt pgTransformPoint(PgMatrix ctm, PgPt p) {
     return (PgPt) {
-        ctm->a * p.x + ctm->c * p.y + ctm->e,
-        ctm->b * p.x + ctm->d * p.y + ctm->f
+        ctm.a * p.x + ctm.c * p.y + ctm.e,
+        ctm.b * p.x + ctm.d * p.y + ctm.f
     };
 }
-PgPt *pgTransformPoints(const PgMatrix *ctm, PgPt *v, int n) {
+PgPt *pgTransformPoints(PgMatrix ctm, PgPt *v, int n) {
     for (int i = 0; i < n; i++)
         v[i] = pgTransformPoint(ctm, v[i]);
     return v;
@@ -348,9 +350,61 @@ void pgQuad(PgPath *path, PgPt b, PgPt c) {
 void pgCubic(PgPath *path, PgPt b, PgPt c, PgPt d) {
     addPathPart(path, PG_CUBIC, b, c, d);
 }
+void pgClosePath(PgPath *path) {
+    if (!path->nsubs) return;
+    addPathPart(path, PG_LINE, path->data[path->npoints - path->subs[path->nsubs - 1]]);
+}
 void pgFillPath(Pg *g, PgPath *path, uint32_t color) {
     g->fillPath(g, path, color);
 }
 void pgStrokePath(Pg *g, PgPath *path, float width, uint32_t color) {
     g->strokePath(g, path, width, color);
+}
+int pgGetGlyph(PgFont *font, int c) {
+    return font->getGlyph(font, c);
+}
+void pgFreeFont(PgFont *font) {
+    font->free(font);
+}
+void pgScaleFont(PgFont *font, float x, float y) {
+    if (!x) x = y;
+    if (!y) y = x;
+    font->ctm.a = x / font->em;
+    font->ctm.d = y / font->em;
+}
+PgPath *pgGetGlyphPath(PgFont *font, PgPath *path, int glyph) {
+    return font->getGlyphPath(font, path, glyph);
+}
+PgPath *pgGetCharPath(PgFont *font, PgPath *path, int c) {
+    return pgGetGlyphPath(font, path, pgGetGlyph(font, c));
+}
+float pgGetGlyphWidth(PgFont *font, int glyph) {
+    return font->getGlyphWidth(font, glyph);
+}
+float pgGetCharWidth(PgFont *font, int c) {
+    return pgGetGlyphWidth(font, pgGetGlyph(font, c));
+}
+float pgGetStringWidth(PgFont *font, wchar_t *text, int len) {
+    if (len < 0) len = wcslen(text);
+    float x = 0;
+    for (int i = 0; i < len; i++)
+        x += pgGetCharWidth(font, text[i]);
+    return x;
+}
+float pgFillChar(Pg *g, PgFont *font, float x, float y, int c, uint32_t color) {
+    PgPath *path = pgGetCharPath(font, NULL, c);
+    if (path) {
+        for (int i = 0; i < path->npoints; i++)
+            path->data[i].x += x,
+            path->data[i].y += y;
+        pgFillPath(g, path, color);
+        pgFreePath(path);
+    }
+    return x + pgGetCharWidth(font, c);
+}
+float pgFillString(Pg *g, PgFont *font, float x, float y, const wchar_t *text, int len, uint32_t color) {
+    if (len < 0) len = wcslen(text);
+    for (int i = 0; i < len; i++)
+        x = pgFillChar(g, font, x, y, text[i], color);
+    return x;
 }
