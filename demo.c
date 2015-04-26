@@ -220,6 +220,7 @@ void setup() {
 //            _pgMapFile(&host, L"C:/Windows/Fonts/ariblk.ttf"),
 //            _pgMapFile(&host, L"C:/Windows/Fonts/arial.ttf"),
             _pgMapFile(&host, L"C:/Windows/Fonts/SourceCodePro-Regular.ttf"),
+//            _pgMapFile(&host, L"C:/Windows/Fonts/symbol.ttf"),
 //            _pgMapFile(&host, L"C:/Windows/Fonts/cour.ttf"),
             0);
     }
@@ -237,7 +238,7 @@ void repaintClient() {
     
     float pt = 24;
     pgScaleFont(Font, pt, 0);
-    wchar_t *text = L"The quick brown fox jumped over the lazy dog.";
+    wchar_t *text = L"The quick brown fox jumped over the lazy dog*.";
     float w = pgGetStringWidth(Font, text, -1);
     pgTranslate(G, -w / 2.0f, -pt / 2.0f);
     pgRotate(G, tick / 180.0f * 8.0f);
@@ -256,7 +257,7 @@ void repaintClient() {
 //    pgTranslate(G, G->width / 2.0f, G->height / 2.0f);
 //    pgStrokeSvgPath(G, "M0,0 v100", 20.0f, fg);
 
-    fps = 60;
+//    fps = 60;
     
     if (!fps && oldFps) KillTimer(W, 0);
     if (fps) SetTimer(W, 0, 1000 / fps, NULL);
