@@ -218,7 +218,8 @@ void setup() {
         void *host;
         Font = (PgFont*)pgLoadOpenTypeFont(
 //            _pgMapFile(&host, L"C:/Windows/Fonts/ariblk.ttf"),
-            _pgMapFile(&host, L"C:/Windows/Fonts/arial.ttf"),
+//            _pgMapFile(&host, L"C:/Windows/Fonts/arial.ttf"),
+            _pgMapFile(&host, L"C:/Windows/Fonts/SourceCodePro-Regular.ttf"),
 //            _pgMapFile(&host, L"C:/Windows/Fonts/cour.ttf"),
             0);
     }

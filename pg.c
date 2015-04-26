@@ -128,6 +128,8 @@ static segs_t bmp_segmentPath(PgPath *path, PgMatrix ctm, bool close) {
     return segs;
 }
 static void bmp_fillPath(Pg *g, PgPath *path, uint32_t color) {
+    if (!path->npoints) return;
+    
     segs_t segs = bmp_segmentPath(path, g->ctm, true);
     qsort(segs.data, segs.n, sizeof(seg_t), sortSegsDescending);
     float maxY = segs.data[0].b.y;
