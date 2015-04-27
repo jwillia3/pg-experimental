@@ -1,4 +1,4 @@
-#define BEZIER_LIMIT 5
+#define BEZIER_LIMIT 10
 #include <assert.h>
 #include <float.h>
 #include <math.h>
@@ -20,9 +20,15 @@ static void addSeg(segs_t *segs, PgPt a, PgPt b) {
         segs->cap = segs->cap? segs->cap * 2: 8;
         segs->data = realloc(segs->data, segs->cap * sizeof(seg_t));
     }
-    segs->data[segs->n++] = (seg_t) { a, b };
+    segs->data[segs->n++] = (seg_t) {
+        .a = a.y < b.y? a: b,
+        .b = a.y < b.y? b: a,
+        .m = a.y < b.y? (b.x - a.x) / (b.y - a.y):
+            a.y > b.y? (a.x - b.x) / (a.y - b.y):
+            0 };
 }
-static float Flatness = 1.001f;
+#define Subsample 3.0f
+#define Flatness 1.01f
 static void segmentQuad(segs_t *segs, PgPt a, PgPt b, PgPt c, int n) {
     if (!n) {
         addSeg(segs, a, c);
@@ -105,37 +111,31 @@ static segs_t bmp_segmentPath(PgPath *path, PgMatrix ctm, bool close) {
     int *t = (int*)path->types;
     // Decompose curves into line segments
     for (int *sub = path->subs; sub < path->subs + path->nsubs; sub++) {
-        PgPt a = *p++, first = a;
-        for (PgPt *end = p + *sub - 1; p < end; a = (p += *t++)[-1])
-            if (*t == PG_LINE) addSeg(&segs, a, p[0]);
-            else if (*t == PG_QUAD) segmentQuad(&segs, a, p[0], p[1], BEZIER_LIMIT);
-            else if (*t == PG_CUBIC) segmentCubic(&segs, a, p[0], p[1], p[2], BEZIER_LIMIT);
+        PgPt a = pgTransformPoint(ctm, *p++), first = a;
+        for (PgPt *end = p + *sub - 1, next; p < end; p += *t++, a = next) {
+            next = pgTransformPoint(ctm, p[*t - 1]);
+            if (*t == PG_LINE)
+                addSeg(&segs, a, next);
+            else if (*t == PG_QUAD)
+                segmentQuad(&segs, a, pgTransformPoint(ctm, p[0]), next, BEZIER_LIMIT);
+            else if (*t == PG_CUBIC)
+                segmentCubic(&segs, a, pgTransformPoint(ctm, p[0]), pgTransformPoint(ctm, p[1]), next, BEZIER_LIMIT);
+        }
         if (close)
             addSeg(&segs, a, first);
-    }
-    // Transform points and make sure point A is the above B
-    // Then sort them so that A's that Y's are first; for ties, low X's first
-    for (int i = 0; i < segs.n; i++) {
-        PgPt a = pgTransformPoint(ctm, segs.data[i].a);
-        PgPt b = pgTransformPoint(ctm, segs.data[i].b);
-        float m = a.y < b.y?
-            (b.x - a.x) / (b.y - a.y):
-            a.y == b.y? 0: (a.x - b.x) / (a.y - b.y);
-        segs.data[i].a = a.y < b.y? a: b;
-        segs.data[i].b = a.y < b.y? b: a;
-        segs.data[i].m = m;
     }
     return segs;
 }
 static void bmp_fillPath(Pg *g, PgPath *path, uint32_t color) {
     if (!path->npoints) return;
-    
-    segs_t segs = bmp_segmentPath(path, g->ctm, true);
+    PgMatrix ctm = g->ctm;
+    pgScaleMatrix(&ctm, 1, Subsample);
+    segs_t segs = bmp_segmentPath(path, ctm, true);
     qsort(segs.data, segs.n, sizeof(seg_t), sortSegsDescending);
     float maxY = segs.data[0].b.y;
     for (seg_t *seg = segs.data + 1; seg < segs.data + segs.n; seg++)
         maxY = max(maxY, seg->b.y);
-    maxY = clamp(g->clip.y1, maxY + 1, g->clip.y2);
+    maxY = clamp(g->clip.y1, maxY / Subsample + 1, g->clip.y2);
     
     // Scan through lines filling between edge
     typedef struct { float x, m, y2; } edge_t;
@@ -143,45 +143,64 @@ static void bmp_fillPath(Pg *g, PgPath *path, uint32_t color) {
     int nedges = 0;
     seg_t *seg = segs.data;
     seg_t *endSeg = seg + segs.n;
-    for (int scanY = max(g->clip.y1, segs.data[0].a.y); scanY < maxY; scanY++) {
-        float y = scanY + 0.5f;
-        edge_t *endEdge = edges + nedges;
-        nedges = 0;
-        for (edge_t *e = edges; e < endEdge; e++)
-            if (y <= e->y2) {
-                e->x += e->m;
-                edges[nedges++] = *e;
+    uint8_t *buf = malloc(g->width);
+    int minx = g->clip.x1;
+    int maxx = g->clip.x2 - 1;
+    for (int scanY = max(g->clip.y1, segs.data[0].a.y / Subsample); scanY < maxY; scanY++) {
+        if (minx <= maxx)
+            memset(buf + minx, 0, maxx - minx + 1);
+        minx = g->clip.x2 - 1;
+        maxx = g->clip.x1;
+        for (float ss = -Subsample / 2.0f; ss < Subsample / 2.0f; ss++) {
+            float y = Subsample * scanY + ss + 0.5f;
+            edge_t *endEdge = edges + nedges;
+            nedges = 0;
+            for (edge_t *e = edges; e < endEdge; e++)
+                if (y <= e->y2) {
+                    e->x += e->m;
+                    edges[nedges++] = *e;
+                }
+            for ( ; seg < endSeg && seg->a.y < y; seg++)
+                if (seg->b.y >= y)
+                    edges[nedges++] = (edge_t) {
+                        .x = seg->a.x + seg->m * (y - seg->a.y),
+                        .m = seg->m,
+                        .y2 = seg->b.y,
+                    };
+            for (int i = 1; i < nedges; i++)
+                for (int j = i; j > 0 && edges[j - 1].x > edges[j].x; j--) {
+                    edge_t tmp = edges[j];
+                    edges[j] = edges[j - 1];
+                    edges[j - 1] = tmp;
+                }
+                    
+            float level = 255.0f / Subsample;
+            for (edge_t *e = edges + 1; e < edges + nedges; e += 2) {
+                float x1 = e[-1].x;
+                float x2 = e[0].x;
+                if (x2 < g->clip.x1 || x1 >= g->clip.x2) continue;
+                int a = clamp(g->clip.x1, x1, g->clip.x2);
+                int b = clamp(g->clip.x1, x2, g->clip.x2);
+                minx = min(minx, a);
+                maxx = max(maxx, b);
+                if (a == b)
+                    buf[a] += (x2 - x1) * level;
+                else {
+                    if (x1 >= g->clip.x1)
+                        buf[a++] += (1.0f - fraction(x1)) * level;
+                    for (int x = a; x < b; x++)
+                        buf[x] += level;
+                    if (x2 < g->clip.x2)
+                        buf[b] += fraction(x2) * level;
+                }
             }
-        for ( ; seg < endSeg && seg->a.y < y; seg++)
-            if (seg->b.y >= y)
-                edges[nedges++] = (edge_t) {
-                    .x = seg->a.x + seg->m * (y - seg->a.y),
-                    .m = seg->m,
-                    .y2 = seg->b.y,
-                };
-        for (int i = 1; i < nedges; i++)
-            for (int j = i; j > 0 && edges[j - 1].x > edges[j].x; j--) {
-                edge_t tmp = edges[j];
-                edges[j] = edges[j - 1];
-                edges[j - 1] = tmp;
-            }
-                
-        uint32_t *__restrict bmp = g->bmp + scanY * g->width;
-        for (edge_t *e = edges + 1; e < edges + nedges; e += 2) {
-            float x1 = e[-1].x;
-            float x2 = e[0].x;
-            if (x2 < g->clip.x1 || x1 >= g->clip.x2) continue;
-            int a = clamp(g->clip.x1, x1, g->clip.x2);
-            int b = clamp(g->clip.x1, x2, g->clip.x2);
-            if (x1 >= g->clip.x1) {
-                bmp[a] = blend(bmp[a], color, fraction(x1) * 255);
-                a++;
-            }
-            for (int x = a; x < b; x++) bmp[x] = color;
-            if (x2 < g->clip.x2)
-                bmp[b] = blend(bmp[b+1], color, (1 - fraction(x2)) * 255);
         }
+        uint32_t *__restrict bmp = g->bmp + scanY * g->width;
+        maxx = min(maxx, g->clip.x2 - 1);
+        for (int i = minx; i <= maxx; i++)
+            bmp[i] = blend(color, bmp[i], buf[i]);
     }
+    free(buf);
     free(edges);
     free(segs.data);
 }

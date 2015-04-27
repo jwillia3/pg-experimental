@@ -219,9 +219,9 @@ void setup() {
         Font = (PgFont*)pgLoadOpenTypeFont(
 //            _pgMapFile(&host, L"C:/Windows/Fonts/ariblk.ttf"),
 //            _pgMapFile(&host, L"C:/Windows/Fonts/arial.ttf"),
-            _pgMapFile(&host, L"C:/Windows/Fonts/SourceCodePro-Regular.ttf"),
+//            _pgMapFile(&host, L"C:/Windows/Fonts/SourceCodePro-Regular.ttf"),
 //            _pgMapFile(&host, L"C:/Windows/Fonts/FiraMono-Regular.ttf"),
-//            _pgMapFile(&host, L"C:/Windows/Fonts/symbol.ttf"),
+            _pgMapFile(&host, L"C:/Windows/Fonts/symbol.ttf"),
 //            _pgMapFile(&host, L"C:/Windows/Fonts/cour.ttf"),
             0);
     }
@@ -237,17 +237,22 @@ void repaintClient() {
 
     setup();
         
+//    pgScaleFont(Font, tick/10.0f, 0);
 //    pgScaleFont(Font, 96, 0);
-    pgFillChar(G, Font, 0, 0, 'a', 0x000000);
+////    pgScaleFont(Font, 800, 0);
+//    pgFillChar(G, Font, 0, 0, 'a', 0x000000);
+//    fps = 60;
+//    tick = 415;
     
-//    float pt = 12;
-//    pgScaleFont(Font, pt, 0);
-//    wchar_t *text = L"The quick brown fox jumped over the lazy dog0123456789=.";
-//    float w = pgGetStringWidth(Font, text, -1);
-//    pgTranslate(G, -w / 2.0f, -pt / 2.0f);
-//    pgRotate(G, tick / 180.0f * 8.0f);
-//    pgTranslate(G, G->width / 2.0f, G->height / 2.0f);
-//    pgFillString(G, Font, 0, 0, text, -1, fg);
+//    float pt = tick/10.0f;
+    float pt = 12.0f;
+    pgScaleFont(Font, pt, 0);
+    wchar_t *text = L"The quick brown fox jumped over the lazy dog0123456789=.";
+    float w = pgGetStringWidth(Font, text, -1);
+    pgTranslate(G, -w / 2.0f, -pt / 2.0f);
+    pgRotate(G, tick / 180.0f * 8.0f);
+    pgTranslate(G, G->width / 2.0f, G->height / 2.0f);
+    pgFillString(G, Font, 0, 0, text, -1, fg);
 
 //    PgPath *path = pgGetCharPath(Font, NULL, '=');
 //    if (path) {
