@@ -22,7 +22,7 @@ static void addSeg(segs_t *segs, PgPt a, PgPt b) {
     }
     segs->data[segs->n++] = (seg_t) { a, b };
 }
-static float Flatness = 1.01f;
+static float Flatness = 1.001f;
 static void segmentQuad(segs_t *segs, PgPt a, PgPt b, PgPt c, int n) {
     if (!n) {
         addSeg(segs, a, c);
@@ -31,7 +31,7 @@ static void segmentQuad(segs_t *segs, PgPt a, PgPt b, PgPt c, int n) {
     float ab = distance(pgPt(a.x - b.x, a.y - b.y));
     float bc = distance(pgPt(b.x - c.x, b.y - c.y));
     float ac = distance(pgPt(a.x - c.x, a.y - c.y));
-    if (ab + bc + ac >= Flatness * ac) {
+    if (ab + bc >= Flatness * ac) {
         PgPt ab = midpoint(a, b);
         PgPt bc = midpoint(b, c);
         PgPt abc = midpoint(ab, bc);
@@ -135,7 +135,7 @@ static void bmp_fillPath(Pg *g, PgPath *path, uint32_t color) {
     float maxY = segs.data[0].b.y;
     for (seg_t *seg = segs.data + 1; seg < segs.data + segs.n; seg++)
         maxY = max(maxY, seg->b.y);
-    maxY = clamp(g->clip.y1, maxY, g->clip.y2);
+    maxY = clamp(g->clip.y1, maxY + 1, g->clip.y2);
     
     // Scan through lines filling between edge
     typedef struct { float x, m, y2; } edge_t;
@@ -148,12 +148,12 @@ static void bmp_fillPath(Pg *g, PgPath *path, uint32_t color) {
         edge_t *endEdge = edges + nedges;
         nedges = 0;
         for (edge_t *e = edges; e < endEdge; e++)
-            if (y < e->y2) {
+            if (y <= e->y2) {
                 e->x += e->m;
                 edges[nedges++] = *e;
             }
         for ( ; seg < endSeg && seg->a.y < y; seg++)
-            if (seg->b.y > y)
+            if (seg->b.y >= y)
                 edges[nedges++] = (edge_t) {
                     .x = seg->a.x + seg->m * (y - seg->a.y),
                     .m = seg->m,
@@ -165,6 +165,7 @@ static void bmp_fillPath(Pg *g, PgPath *path, uint32_t color) {
                 edges[j] = edges[j - 1];
                 edges[j - 1] = tmp;
             }
+                
         uint32_t *__restrict bmp = g->bmp + scanY * g->width;
         for (edge_t *e = edges + 1; e < edges + nedges; e += 2) {
             float x1 = e[-1].x;

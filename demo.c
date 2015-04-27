@@ -195,14 +195,14 @@ void save() {
             uint32_t compression, dataSize, xres, yres, used, important;
         } bmp;
     } head = {
-        { "BM", sizeof head + G->width * G->height * 4, 0, sizeof head },
-        { sizeof head.bmp, G->width, -G->height, 1, 32, 0,
-          G->width * G->height * 4, 96, 96, -1, -1 }
+        { "BM", sizeof head + G->width * (G->height - 32) * 4, 0, sizeof head },
+        { sizeof head.bmp, G->width, -(G->height - 32), 1, 32, 0,
+          G->width * (G->height - 32) * 4, 96, 96, -1, -1 }
     };
     #pragma pack(pop)
     FILE *file = fopen("out.bmp", "wb");
     fwrite(&head, 1, sizeof head, file);
-    fwrite(G->bmp, 1, G->width * G->height * 4, file);
+    fwrite(G->bmp + 32 * G->width, 1, G->width * (G->height - 32) * 4, file);
     fclose(file);
 }
 
@@ -219,8 +219,8 @@ void setup() {
         Font = (PgFont*)pgLoadOpenTypeFont(
 //            _pgMapFile(&host, L"C:/Windows/Fonts/ariblk.ttf"),
 //            _pgMapFile(&host, L"C:/Windows/Fonts/arial.ttf"),
-//            _pgMapFile(&host, L"C:/Windows/Fonts/SourceCodePro-Regular.ttf"),
-            _pgMapFile(&host, L"C:/Windows/Fonts/FiraMono-Regular.ttf"),
+            _pgMapFile(&host, L"C:/Windows/Fonts/SourceCodePro-Regular.ttf"),
+//            _pgMapFile(&host, L"C:/Windows/Fonts/FiraMono-Regular.ttf"),
 //            _pgMapFile(&host, L"C:/Windows/Fonts/symbol.ttf"),
 //            _pgMapFile(&host, L"C:/Windows/Fonts/cour.ttf"),
             0);
@@ -236,15 +236,18 @@ void repaintClient() {
 //    pgTranslate(G, G->width / 2.0f, G->height / 2.0f);
 
     setup();
+        
+//    pgScaleFont(Font, 96, 0);
+    pgFillChar(G, Font, 0, 0, 'a', 0x000000);
     
-    float pt = 16;
-    pgScaleFont(Font, pt, 0);
-    wchar_t *text = L"The quick brown fox jumped over the lazy dog0123456789=.";
-    float w = pgGetStringWidth(Font, text, -1);
+//    float pt = 12;
+//    pgScaleFont(Font, pt, 0);
+//    wchar_t *text = L"The quick brown fox jumped over the lazy dog0123456789=.";
+//    float w = pgGetStringWidth(Font, text, -1);
 //    pgTranslate(G, -w / 2.0f, -pt / 2.0f);
 //    pgRotate(G, tick / 180.0f * 8.0f);
 //    pgTranslate(G, G->width / 2.0f, G->height / 2.0f);
-    pgFillString(G, Font, 0, 0, text, -1, fg);
+//    pgFillString(G, Font, 0, 0, text, -1, fg);
 
 //    PgPath *path = pgGetCharPath(Font, NULL, '=');
 //    if (path) {
@@ -276,15 +279,34 @@ void repaintClient() {
     if (fps) SetTimer(W, 0, 1000 / fps, NULL);
     oldFps = fps;
 }
+
+PgFont *UiFont;
 void repaint() {
     pgIdentity(G);
 //    {
+//        if (!UiFont) {
+//            void *host;
+//            UiFont = (PgFont*)pgLoadOpenTypeFont(
+////                _pgMapFile(&host, L"C:/Windows/Fonts/Ariblk.ttf"),
+//                _pgMapFile(&host, L"C:/Windows/Fonts/SegoeUI.ttf"),
+//                0);
+//        }
+//            
 //        PgPath *path = pgNewPath();
 //        pgMove(path, pgPt(0, 0));
 //        pgLine(path, pgPt(G->width, 0));
 //        pgLine(path, pgPt(G->width, 31));
 //        pgLine(path, pgPt(0, 31));
-//        pgFillPath(G, path, 0xaa5533);
+//        pgFillPath(G, path, 0x3377aa);
+//        
+//        pgScaleFont(UiFont, 24, 24);
+//        
+//        wchar_t title[255];
+//        GetWindowText(W, title, 255);
+//        float width = pgGetStringWidth(UiFont, title, -1);
+//        pgFillString(G, UiFont,
+//            G->width / 2.0f - width / 2.0f, 4,
+//            title, wcslen(title), 0x444444);
 //        
 //        pgClearPath(path);
 //        pgTranslate(G, G->width - 24, 8);
