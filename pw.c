@@ -24,6 +24,6 @@ void pwSetTitle(Pw *win, const wchar_t *title) {
 void pwLoop() {
     _pwLoop();
 }
-Pw *pwNew(int width, int height, const wchar_t *title, void (*onRepaint)(Pw *win)) {
-    return _pwNew(width, height, title, onRepaint);
+Pw *pwNew(int width, int height, const wchar_t *title, void (*onSetup)(Pw *win, void *etc), void *etc) {
+    return _pwNew(width, height, title, onSetup, etc);
 }

@@ -23,6 +23,7 @@ typedef struct {
 } GdiPg;
 
 static PgFont *UiFont;
+static int nOpenWindows;
 
 static void gdi_resize(Pg *_g, int width, int height) {
     GdiPg *g = (void*)_g;
@@ -198,22 +199,29 @@ static LRESULT WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
         update(win);
         return 0;
     case WM_CREATE:
-        gdi = ((CREATESTRUCT*)lparam)->lpCreateParams;
+        nOpenWindows++;
+        gdi = ((void**)((CREATESTRUCT*)lparam)->lpCreateParams)[0];
+        void (*setup)(Pw*,void*), *etc;
+        setup = ((void**)((CREATESTRUCT*)lparam)->lpCreateParams)[1];
+        etc = ((void**)((CREATESTRUCT*)lparam)->lpCreateParams)[2];
         win = &gdi->_;
         SetProp(hwnd, L"pw", gdi);
         gdi->hwnd = hwnd;
         win->g = pgNewGdiCanvas(0, 0);
+        if (setup)
+            setup(win, etc);
         return 0;
     case WM_ERASEBKGND:
         return 0;
     case WM_DESTROY:
-        PostQuitMessage(0);
+        if (!--nOpenWindows)
+            PostQuitMessage(0);
         return 0;
     }
     return DefWindowProc(hwnd, msg, wparam, lparam);
 }
 
-Pw *pwOpenGdiWindow(int width, int height, const wchar_t *title, void (*onRepaint)(Pw *win)) {
+Pw *pwOpenGdiWindow(int width, int height, const wchar_t *title, void (*onSetup)(Pw *win, void *etc), void *etc) {
     RegisterClass(&(WNDCLASS){ CS_HREDRAW|CS_VREDRAW, WndProc, 0, 0,
         GetModuleHandle(NULL), LoadIcon(NULL, IDI_APPLICATION),
         LoadCursor(NULL, IDC_ARROW), (HBRUSH)(COLOR_WINDOW + 1),
@@ -222,7 +230,6 @@ Pw *pwOpenGdiWindow(int width, int height, const wchar_t *title, void (*onRepain
     PwGdiWindow *gdi = calloc(1, sizeof *gdi);
     Pw *win = &gdi->_;
     win->title = wcsdup(title);
-    win->onRepaint = onRepaint;
     win->update = update;
     win->setTitle = setTitle;
     win->resize = resize;
@@ -232,11 +239,11 @@ Pw *pwOpenGdiWindow(int width, int height, const wchar_t *title, void (*onRepain
         L"GenericWindow", title,
         WS_OVERLAPPEDWINDOW|WS_VISIBLE,
         CW_USEDEFAULT, CW_USEDEFAULT, width, height,
-        NULL, NULL, GetModuleHandle(NULL), gdi);
+        NULL, NULL, GetModuleHandle(NULL), (void*[]){ gdi, onSetup, etc });
     return win;
 }
-Pw *_pwNew(int width, int height, const wchar_t *text, void (*onRepaint)(Pw *win)) {
-    return pwOpenGdiWindow(width, height, text, onRepaint);
+Pw *_pwNew(int width, int height, const wchar_t *title, void (*onSetup)(Pw *win, void *etc), void *etc) {
+    return pwOpenGdiWindow(width, height, title, onSetup, etc);
 }
 void _pwLoop() {
     MSG msg;

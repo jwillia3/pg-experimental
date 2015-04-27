@@ -2,7 +2,7 @@ void *_pgMapFile(void **hostp, const wchar_t *filename);
 void _pgFreeFileMap(void *host);
 
 typedef struct Pw Pw;
-Pw *_pwNew(int width, int height, const wchar_t *text, void (*onRepaint)(Pw *win));
+Pw *_pwNew(int width, int height, const wchar_t *title, void (*onSetup)(Pw *win, void *etc), void *etc);
 void _pwLoop();
 
 int16_t native16(int16_t x);

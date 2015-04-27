@@ -1,6 +1,3 @@
-#define UNICODE
-#define WIN32_WINNT 0x0601
-#define WIN32_LEAN_AND_MEAN
 #include <ctype.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -158,7 +155,7 @@ void setup() {
     if (!Font) {
         void *host;
         Font = (PgFont*)pgLoadOpenTypeFont(
-            _pgMapFile(&host, L"C:/Windows/Fonts/arial.ttf"),
+            _pgMapFile(&host, L"C:/Windows/Fonts/SourceCodePro-Regular.ttf"),
             0);
     }
 }
@@ -171,20 +168,23 @@ static bool onChar(Pw *win, uint32_t state, int c) {
     pwUpdate(win);
     return 0;
 }
-static void repaint(Pw *win) {
+static void onRepaint(Pw *win) {
     Pg *g = win->g;
     
     pgClearCanvas(g, bg);
     pgIdentity(g);
     setup();
     
-    pgScaleFont(Font, 24.0f, 0);
+    pgScaleFont(Font, 12.0f, 0);
     pgFillString(g, Font, 0, 0, Buf, BufLen, fg);
+}
+static void onSetup(Pw *win, void *etc) {
+    win->onRepaint = onRepaint;
 }
 
 
 int pwMain() {
-    Pw *win = pwNew(1024, 800, L"Test Window", repaint);
+    Pw *win = pwNew(1024, 800, L"Test Window", onSetup, NULL);
     win->onChar = onChar;
     pwLoop();
     return 0;

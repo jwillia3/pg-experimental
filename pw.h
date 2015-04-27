@@ -3,6 +3,7 @@ typedef struct Pw Pw;
 struct Pw {
     Pg *g;
     wchar_t *title;
+    void *etc;
     
     void (*onClose)(Pw *win);
     void (*onMove)(Pw *win, int x, int y);
@@ -18,7 +19,7 @@ struct Pw {
     void (*update)(Pw *win);
     void (*setTitle)(Pw *win, const wchar_t *title);
 };
-Pw *pwNew(int width, int height, const wchar_t *title, void (*onRepaint)(Pw *win));
+Pw *pwNew(int width, int height, const wchar_t *title, void (*onSetup)(Pw *win, void *etc), void *etc);
 void pwClose(Pw *win);
 void pwResize(Pw *win, int width, int height);
 void pwUpdate(Pw *win);
