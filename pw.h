@@ -9,8 +9,8 @@ struct Pw {
     void (*onMove)(Pw *win, int x, int y);
     void (*onResize)(Pw *win, int width, int height);
     void (*onRepaint)(Pw *win);
-    bool (*onKeyDown)(Pw *win, uint32_t state);
-    bool (*onKeyUp)(Pw *win, uint32_t state);
+    bool (*onKeyDown)(Pw *win, uint32_t state, int key);
+    bool (*onKeyUp)(Pw *win, uint32_t state, int key);
     bool (*onChar)(Pw *win, uint32_t state, int c);
     bool (*onClick)(Pw *win, uint32_t state);
             

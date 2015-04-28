@@ -385,6 +385,18 @@ void pgStrokePath(Pg *g, PgPath *path, float width, uint32_t color) {
 int pgGetGlyph(PgFont *font, int c) {
     return font->getGlyph(font, c);
 }
+PgFont *pgLoadFontFromFile(wchar_t *filename, int index) {
+    void *host;
+    void *data = _pgMapFile(&host, filename);
+    if (!data)
+        return NULL;
+    PgFont *font = (PgFont*)pgLoadOpenTypeFont(data, index);
+    if (!font) {
+        _pgFreeFileMap(host);
+        return NULL;
+    }
+    return font;
+}
 void pgFreeFont(PgFont *font) {
     font->free(font);
 }

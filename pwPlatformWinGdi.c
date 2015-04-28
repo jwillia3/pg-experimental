@@ -10,6 +10,7 @@
 #include "platform.h"
 #pragma comment(lib, "gdi32")
 #pragma comment(lib, "user32")
+enum { Chrome = 32 };
 
 typedef struct PwGdiWindow PwGdiWindow;
 struct PwGdiWindow {
@@ -20,13 +21,24 @@ typedef struct {
     Pg g;
     HBITMAP dib;
     void (*oldResize)(Pg *g, int width, int height);
-} GdiPg;
+    void (*oldFree)(Pg *g);
+} PgDibBitmap;
 
 static PgFont *UiFont;
 static int nOpenWindows;
 
-static void gdi_resize(Pg *_g, int width, int height) {
-    GdiPg *g = (void*)_g;
+static void includeChrome(Pg *g) {
+    g->clip.y2 += Chrome;
+    g->height += Chrome;
+    g->bmp -= g->width * Chrome;
+}
+static void excludeChrome(Pg *g) {
+    g->clip.y2 -= Chrome;
+    g->height -= Chrome;
+    g->bmp += g->width * Chrome;
+}
+static void dib_resize(Pg *_g, int width, int height) {
+    PgDibBitmap *g = (void*)_g;
     g->g.bmp = NULL;
     g->oldResize(&g->g, width, height);
     free(g->g.bmp);
@@ -41,12 +53,22 @@ static void gdi_resize(Pg *_g, int width, int height) {
         &(void*)g->g.bmp,
         NULL, 0);
 }
+static void dib_free(Pg *_g) {
+    PgDibBitmap *g = (void*)_g;
+    g->g.bmp = NULL;
+    g->oldFree(&g->g);
+    DeleteObject(g->dib);
+    free(g);
+}
+
 
 Pg *pgNewGdiCanvas(int width, int height) {
-    GdiPg *g = (GdiPg*)pgNewBitmapCanvas(0, 0);
+    PgDibBitmap *g = (PgDibBitmap*)pgNewBitmapCanvas(0, 0);
     g = realloc(g, sizeof *g);
     g->oldResize = g->g.resize;
-    g->g.resize = gdi_resize;
+    g->oldFree = g->g.free;
+    g->g.resize = dib_resize;
+    g->g.free = dib_free;
     g->dib = NULL;
     g->g.resize(&g->g, width, height);
     return &g->g;
@@ -66,6 +88,7 @@ static void repaint(PwGdiWindow *gdi) {
     Pw *win = &gdi->_;
     Pg *g = win->g;
     pgIdentity(g);
+    includeChrome(g);
     {
         if (!UiFont) {
             void *host;
@@ -113,15 +136,10 @@ static void repaint(PwGdiWindow *gdi) {
         
         pgFreePath(path);
     }
-    g->height -= 32;
-    g->bmp += g->width * 32;
-    g->clip.y2 -= 32;
+    excludeChrome(g);
     pgIdentity(g);
     if (win->onRepaint)
         win->onRepaint(win);
-    g->clip.y2 += 32;
-    g->height += 32;
-    g->bmp -= g->width * 32;
 }
 static void update(Pw *win) {
     PwGdiWindow *gdi = (PwGdiWindow*)win;
@@ -129,10 +147,12 @@ static void update(Pw *win) {
     Pg *g = gdi->_.g;
     HDC wdc = GetDC(gdi->hwnd);
     HDC cdc = CreateCompatibleDC(wdc);
-    HGDIOBJ old = SelectObject(cdc, ((GdiPg*)g)->dib);
+    HGDIOBJ old = SelectObject(cdc, ((PgDibBitmap*)g)->dib);
+    includeChrome(g);
     UpdateLayeredWindow(gdi->hwnd, wdc, NULL,
         &(SIZE){ g->width, g->height },
         cdc, &(POINT){ 0, 0 }, 0, NULL, ULW_OPAQUE);
+    excludeChrome(g);
     SelectObject(cdc, old);
     ReleaseDC(gdi->hwnd, wdc);
     DeleteDC(cdc);
@@ -152,18 +172,23 @@ static LRESULT WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
     
     switch (msg) {
     case WM_KEYDOWN:
-        return win->onKeyDown? win->onKeyDown(win, state()): 0;
+    case WM_SYSKEYDOWN:
+        return win->onKeyDown? win->onKeyDown(win, state(), wparam): true;
     case WM_KEYUP:
-        return win->onKeyUp? win->onKeyUp(win, state()): 0;
+    case WM_SYSKEYUP:
+        return win->onKeyUp? win->onKeyUp(win, state(), wparam): true;
     case WM_CHAR:
-        return win->onChar? win->onChar(win, state(), wparam): 0;
+    case WM_SYSCHAR:
+        if (win->onChar? win->onChar(win, state(), wparam): true)
+            break;
+        return 0;
     case WM_LBUTTONDOWN:
     case WM_LBUTTONUP:
     case WM_MBUTTONDOWN:
     case WM_MBUTTONUP:
     case WM_RBUTTONDOWN:
     case WM_RBUTTONUP:
-        return win->onClick? win->onClick(win, state()): 0;
+        return win->onClick? win->onClick(win, state()): true;
     
     case WM_NCHITTEST: {
             RECT r;
@@ -192,12 +217,16 @@ static LRESULT WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
             return HTCLIENT;
         }
         
-    case WM_SIZE:
-        pgResizeCanvas(win->g, LOWORD(lparam), HIWORD(lparam));
-        if (win->onResize)
-            win->onResize(win, LOWORD(lparam), HIWORD(lparam));
-        update(win);
-        return 0;
+    case WM_SIZE: {
+            RECT r;
+            GetWindowRect(hwnd, &r);
+            pgResizeCanvas(win->g, r.right - r.left, r.bottom - r.top);
+            excludeChrome(win->g);
+            if (win->onResize)
+                win->onResize(win, win->g->width, win->g->height);
+            update(win);
+            return 0;
+        }
     case WM_CREATE:
         nOpenWindows++;
         gdi = ((void**)((CREATESTRUCT*)lparam)->lpCreateParams)[0];
@@ -238,7 +267,7 @@ Pw *pwOpenGdiWindow(int width, int height, const wchar_t *title, void (*onSetup)
         WS_EX_LAYERED,
         L"GenericWindow", title,
         WS_OVERLAPPEDWINDOW|WS_VISIBLE,
-        CW_USEDEFAULT, CW_USEDEFAULT, width, height,
+        CW_USEDEFAULT, CW_USEDEFAULT, width, height + Chrome,
         NULL, NULL, GetModuleHandle(NULL), (void*[]){ gdi, onSetup, etc });
     return win;
 }

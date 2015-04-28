@@ -92,6 +92,8 @@ static PgRect pgRect(PgPt a, PgPt b) { return (PgRect){ .a = a, .b = b }; }
 // Fonts
     PgOpenTypeFont *pgLoadOpenTypeFontHeader(const void *file, int fontIndex);
     PgOpenTypeFont *pgLoadOpenTypeFont(const void *file, int fontIndex);
+    
+    PgFont *pgLoadFontFromFile(wchar_t *filename, int index);
     int pgGetGlyph(PgFont *font, int c);
     void pgFreeFont(PgFont *font);
     void pgScaleFont(PgFont *font, float x, float y);
