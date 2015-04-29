@@ -442,3 +442,22 @@ float pgFillString(Pg *g, PgFont *font, float x, float y, const wchar_t *text, i
         x = pgFillChar(g, font, x, y, text[i], color);
     return x;
 }
+void pgFillRect(Pg *g, PgPt a, PgPt b, uint32_t color) {
+    PgPath *path = pgNewPath();
+    pgMove(path, a);
+    pgLine(path, pgPt(b.x, a.y));
+    pgLine(path, b);
+    pgLine(path, pgPt(a.x, b.y));
+    pgFillPath(g, path, color);
+    pgFreePath(path);
+}
+void pgStrokeRect(Pg *g, PgPt a, PgPt b, float width, uint32_t color) {
+    PgPath *path = pgNewPath();
+    pgMove(path, a);
+    pgLine(path, pgPt(b.x, a.y));
+    pgLine(path, b);
+    pgLine(path, pgPt(a.x, b.y));
+    pgClosePath(path);
+    pgFillPath(g, path, color);
+    pgFreePath(path);
+}

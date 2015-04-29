@@ -162,7 +162,7 @@ static uint32_t state() {
             (GetKeyState(VK_MBUTTON)? 0x02: 0) |
             (GetKeyState(VK_RBUTTON)? 0x04: 0) |
             (GetKeyState(VK_SHIFT)? 0x10: 0) |
-            (GetKeyState(VK_MENU)? 0x20: 0) |
+            (GetAsyncKeyState(VK_MENU)? 0x20: 0) |
             (GetKeyState(VK_CONTROL)? 0x40: 0);
 }
 static LRESULT WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {

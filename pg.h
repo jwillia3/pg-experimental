@@ -104,3 +104,5 @@ static PgRect pgRect(PgPt a, PgPt b) { return (PgRect){ .a = a, .b = b }; }
     float pgGetCharWidth(PgFont *font, int c);
     float pgGetGlyphWidth(PgFont *font, int c);
     float pgGetStringWidth(PgFont *font, wchar_t *text, int len);
+    void pgFillRect(Pg *g, PgPt a, PgPt b, uint32_t color);
+    void pgStrokeRect(Pg *g, PgPt a, PgPt b, float width, uint32_t color);
