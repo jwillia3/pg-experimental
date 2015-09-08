@@ -28,7 +28,7 @@ static void addSeg(segs_t *segs, PgPt a, PgPt b) {
             0 };
 }
 #define Subsample 3.0f
-#define Flatness 1.01f
+#define Flatness 1.001f
 static void segmentQuad(segs_t *segs, PgPt a, PgPt b, PgPt c, int n) {
     if (!n) {
         addSeg(segs, a, c);
@@ -91,15 +91,24 @@ static uint32_t blend(uint32_t fg, uint32_t bg, uint32_t a) {
 }
 
 static void bmp_clear(Pg *g, uint32_t color) {
-    for (int i = 0; i < g->width * g->height; i++)
-        g->bmp[i] = color;
+    if (g->stride == g->width)
+        for (int i = 0; i < g->stride * g->height; i++)
+            g->bmp[i] = color;
+    else
+        for (int y = 0; y < g->height; y++)
+        for (int x = 0; x < g->width; x++)
+            g->bmp[y * g->stride + x] = color;
 }
 static void bmp_free(Pg *g) {
-    free(g->bmp);
+    if (!g->borrowed)
+        free(g->bmp);
     free(g);
 }
 static void bmp_resize(Pg *g, int width, int height) {
+    if (g->borrowed)
+        return;
     free(g->bmp);
+    g->stride = width;
     g->width = width;
     g->height = height;
     g->clip = (PgRect){ 0, 0, width, height };
@@ -143,7 +152,7 @@ static void bmp_fillPath(Pg *g, PgPath *path, uint32_t color) {
     int nedges = 0;
     seg_t *seg = segs.data;
     seg_t *endSeg = seg + segs.n;
-    uint8_t *buf = malloc(g->width);
+    uint8_t *buf = malloc(g->stride);
     int minx = g->clip.x1;
     int maxx = g->clip.x2 - 1;
     for (int scanY = max(g->clip.y1, segs.data[0].a.y / Subsample); scanY < maxY; scanY++) {
@@ -195,7 +204,7 @@ static void bmp_fillPath(Pg *g, PgPath *path, uint32_t color) {
                 }
             }
         }
-        uint32_t *__restrict bmp = g->bmp + scanY * g->width;
+        uint32_t *__restrict bmp = g->bmp + scanY * g->stride;
         maxx = min(maxx, g->clip.x2 - 1);
         for (int i = minx; i <= maxx; i++)
             bmp[i] = blend(color, bmp[i], buf[i]);
@@ -232,6 +241,19 @@ static void bmp_strokePath(Pg *g, PgPath *path, float width, uint32_t color) {
     free(segs.data);
     g->ctm = otm;
 }
+static Pg *bmp_subsection(Pg *original, PgRect rect) {
+    Pg *g = malloc(sizeof *g);
+    *g = *original;
+    rect.a.x = clamp(0, rect.a.x, g->width);
+    rect.b.x = clamp(0, rect.b.x, g->width);
+    g->width = clamp(0, rect.b.x - rect.a.x, g->width);
+    g->height = clamp(0, rect.b.y - rect.a.y, g->height);
+    g->clip.b.x = min(g->clip.b.x, g->width);
+    g->clip.b.y = min(g->clip.b.y, g->height);
+    g->borrowed = true;
+    g->bmp += (int)rect.a.x + (int)rect.a.y * original->stride;
+    return g;
+}
 Pg *pgNewBitmapCanvas(int width, int height) {
     Pg *g = calloc(1, sizeof *g);
     g->resize = bmp_resize;
@@ -239,9 +261,13 @@ Pg *pgNewBitmapCanvas(int width, int height) {
     g->free = bmp_free;
     g->fillPath = bmp_fillPath;
     g->strokePath = bmp_strokePath;
+    g->subsection = bmp_subsection;
     pgIdentityMatrix(&g->ctm);
     g->resize(g, width, height);
     return g;
+}
+Pg *pgSubsectionCanvas(Pg *g, PgRect rect) {
+    return g->subsection(g, rect);
 }
 void pgClearCanvas(Pg *g, uint32_t color) {
     g->clear(g, color);
@@ -425,6 +451,34 @@ float pgGetStringWidth(PgFont *font, wchar_t *text, int len) {
         x += pgGetCharWidth(font, text[i]);
     return x;
 }
+float pgGetFontEm(PgFont *font) {
+    return font->ctm.a * font->em;
+}
+float pgGetFontXHeight(PgFont *font) {
+    return font->ctm.a * font->xHeight;
+}
+float pgGetFontCapHeight(PgFont *font) {
+    return font->ctm.a * font->capHeight;
+}
+float pgGetFontAscender(PgFont *font) {
+    return font->ctm.a * font->ascender;
+}
+float pgGetFontDescender(PgFont *font) {
+    return font->ctm.a * font->descender;
+}
+float pgGetFontLineGap(PgFont *font) {
+    return font->ctm.a * font->lineGap;
+}
+int pgGetFontWeight(PgFont *font) {
+    return font->weight;
+}
+bool pgIsFontItalic(PgFont *font) {
+    return font->isItalic;
+}
+bool pgIsFontFixedPitched(PgFont *font) {
+    return font->isFixedPitched;
+}
+const wchar_t *pgGetFontFamily(PgFont *font);
 float pgFillChar(Pg *g, PgFont *font, float x, float y, int c, uint32_t color) {
     PgPath *path = pgGetCharPath(font, NULL, c);
     if (path) {
@@ -458,6 +512,13 @@ void pgStrokeRect(Pg *g, PgPt a, PgPt b, float width, uint32_t color) {
     pgLine(path, b);
     pgLine(path, pgPt(a.x, b.y));
     pgClosePath(path);
-    pgFillPath(g, path, color);
+    pgStrokePath(g, path, width, color);
+    pgFreePath(path);
+}
+void pgStrokeLine(Pg *g, PgPt a, PgPt b, float width, uint32_t color) {
+    PgPath *path = pgNewPath();
+    pgMove(path, a);
+    pgLine(path, b);
+    pgStrokePath(g, path, width, color);
     pgFreePath(path);
 }

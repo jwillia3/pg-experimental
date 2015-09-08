@@ -279,7 +279,7 @@ redoHeader:
     font->em = nativeu16(head->em);
     otf->longLoca = native16(head->locaFormat);
     otf->nhmtx = nativeu16(hhea->nhmtx);
-    font->weight = nativeu16(os2->weight);
+    memmove(font->panose, os2->panose, 10);
     font->ascender = native16(os2->ascender);
     font->descender = native16(os2->descender);
     font->lineGap = native16(os2->lineGap);
@@ -287,6 +287,7 @@ redoHeader:
     font->capHeight = native16(os2->capHeight);
     font->isItalic = nativeu16(os2->style) & 0x101; // italic or oblique
     otf->nglyphs = nativeu16(maxp->nglyphs);
+    font->isFixedPitched = font->panose[3] == 9;
     return otf;
 }
 

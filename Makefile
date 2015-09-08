@@ -1,5 +1,3 @@
-terminal: terminal.c pg.lib
-	cl -nologo -Zi -Ox -fp:fast terminal.c pg.lib -link /incremental:no
 demo: demo.c pg.lib
 	cl -nologo -Zi -Ox -fp:fast demo.c pg.lib -link /incremental:no
 pg.lib: pg.c pg.h pgOpenType.c pw.c pw.h pwPlatformWinGdi.c

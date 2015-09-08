@@ -2,6 +2,7 @@
 typedef struct Pw Pw;
 struct Pw {
     Pg *g;
+    Pg *chromeCanvas;
     wchar_t *title;
     void *etc;
     

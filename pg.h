@@ -18,12 +18,15 @@ struct Pg {
     int height;
     PgMatrix ctm;
     PgRect clip;
-    uint32_t *bmp;
     void (*resize)(Pg *pg, int width, int height);
     void (*clear)(Pg *pg, uint32_t color);
     void (*free)(Pg *pg);
     void (*fillPath)(Pg *g, PgPath *path, uint32_t color);
     void (*strokePath)(Pg *g, PgPath *path, float width, uint32_t color);
+    Pg *(*subsection)(Pg *pg, PgRect rect);
+    uint32_t *bmp;
+    int stride;
+    bool borrowed;
 };
 typedef struct PgFont PgFont;
 struct PgFont {
@@ -31,8 +34,10 @@ struct PgFont {
     void *host;
     PgMatrix ctm;
     float em, xHeight, capHeight, ascender, descender, lineGap;
+    uint32_t panose[10];
     int weight;
     bool isItalic;
+    bool isFixedPitched;
     const wchar_t *family, name;
     
     void (*free)(PgFont *font);
@@ -57,6 +62,7 @@ static PgRect pgRect(PgPt a, PgPt b) { return (PgRect){ .a = a, .b = b }; }
 
 // CANVAS MANAGEMENT
     Pg *pgNewBitmapCanvas(int width, int height);
+    Pg *pgSubsectionCanvas(Pg *g, PgRect rect);
     void pgClearCanvas(Pg *g, uint32_t color);
     void pgFreeCanvas(Pg *g);
     void pgResizeCanvas(Pg *g, int width, int height);
@@ -93,6 +99,18 @@ static PgRect pgRect(PgPt a, PgPt b) { return (PgRect){ .a = a, .b = b }; }
     PgOpenTypeFont *pgLoadOpenTypeFontHeader(const void *file, int fontIndex);
     PgOpenTypeFont *pgLoadOpenTypeFont(const void *file, int fontIndex);
     
+    float pgGetFontEm(PgFont *font);
+    float pgGetFontXHeight(PgFont *font);
+    float pgGetFontCapHeight(PgFont *font);
+    float pgGetFontAscender(PgFont *font);
+    float pgGetFontDescender(PgFont *font);
+    float pgGetFontLineGap(PgFont *font);
+    int pgGetFontWeight(PgFont *font);
+    bool pgIsFontItalic(PgFont *font);
+    bool pgIsFontFixedPitched(PgFont *font);
+    const wchar_t *pgGetFontFamily(PgFont *font);
+    
+    
     PgFont *pgLoadFontFromFile(wchar_t *filename, int index);
     int pgGetGlyph(PgFont *font, int c);
     void pgFreeFont(PgFont *font);
@@ -106,3 +124,4 @@ static PgRect pgRect(PgPt a, PgPt b) { return (PgRect){ .a = a, .b = b }; }
     float pgGetStringWidth(PgFont *font, wchar_t *text, int len);
     void pgFillRect(Pg *g, PgPt a, PgPt b, uint32_t color);
     void pgStrokeRect(Pg *g, PgPt a, PgPt b, float width, uint32_t color);
+    void pgStrokeLine(Pg *g, PgPt a, PgPt b, float width, uint32_t color);

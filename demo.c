@@ -155,14 +155,17 @@ void setup() {
     if (!Font) {
         void *host;
         Font = (PgFont*)pgLoadOpenTypeFont(
-            _pgMapFile(&host, L"C:/Windows/Fonts/SourceCodePro-Regular.ttf"),
+            _pgMapFile(&host, L"C:/Windows/Fonts/Arial.ttf"),
             0);
     }
 }
 static bool onChar(Pw *win, uint32_t state, int c) {
     if (c == 8) {
         if (BufLen) BufLen--;
-    } else if (c < 32);
+    }
+    else if (c == 23) // ^W
+        win->close(win);
+    else if (c < 32);
     else
         Buf[BufLen++] = c;
     pwUpdate(win);
@@ -175,7 +178,7 @@ static void onRepaint(Pw *win) {
     pgIdentity(g);
     setup();
     
-    pgScaleFont(Font, 12.0f, 0);
+    pgScaleFont(Font, 24.0f, 0);
     pgFillString(g, Font, 0, 0, Buf, BufLen, fg);
 }
 static void onSetup(Pw *win, void *etc) {
