@@ -411,7 +411,16 @@ void pgStrokePath(Pg *g, PgPath *path, float width, uint32_t color) {
 int pgGetGlyph(PgFont *font, int c) {
     return font->getGlyph(font, c);
 }
-PgFont *pgLoadFontFromFile(wchar_t *filename, int index) {
+PgFontFamily *pgScanFonts() {
+    return _pgScanFonts();
+}
+PgFont *pgLoadFontHeader(const void *file, int fontIndex) {
+    return (PgFont*)pgLoadOpenTypeFontHeader(file, fontIndex);
+}
+PgFont *pgLoadFont(const void *file, int fontIndex) {
+    return (PgFont*)pgLoadOpenTypeFont(file, fontIndex);
+}
+PgFont *pgLoadFontFromFile(const wchar_t *filename, int index) {
     void *host;
     void *data = _pgMapFile(&host, filename);
     if (!data)
@@ -421,10 +430,47 @@ PgFont *pgLoadFontFromFile(wchar_t *filename, int index) {
         _pgFreeFileMap(host);
         return NULL;
     }
+    font->host = host;
+    font->freeHost = _pgFreeFileMap;
     return font;
 }
+PgFont *pgOpenFont(const wchar_t *family, int weight, bool italic) {
+    weight /= 100;
+    if (weight == 0)
+        weight = 3;
+    else if (weight >= 10)
+        return NULL;
+    pgScanFonts();
+    for (int i = 0; i < PgNFontFamilies; i++)
+        if (!wcsicmp(family, PgFontFamilies[i].name)) {
+            const wchar_t **set = italic? PgFontFamilies[i].italic: PgFontFamilies[i].roman;
+            const int *indexSet = italic? PgFontFamilies[i].italicIndex: PgFontFamilies[i].romanIndex;
+            for (int i = weight; weight; weight--) {
+                if (!set[weight])
+                    continue;
+                PgFont *font = pgLoadFontFromFile(set[weight], indexSet[weight]);
+                if (font)
+                    return font;
+            }
+            for (int i = weight + 1; weight < 10; weight++) {
+                if (!set[weight])
+                    continue;
+                PgFont *font = pgLoadFontFromFile(set[weight], indexSet[weight]);
+                if (font)
+                    return font;
+            }
+        } 
+    return NULL;
+}
 void pgFreeFont(PgFont *font) {
-    font->free(font);
+    free((void*) font->styleName);
+    free((void*) font->familyName);
+    free((void*) font->name);
+    if (font->freeHost)
+        font->freeHost(font->host);
+    if (font->free)
+        font->free(font);
+    free(font);
 }
 void pgScaleFont(PgFont *font, float x, float y) {
     if (!x) x = y;
@@ -444,7 +490,7 @@ float pgGetGlyphWidth(PgFont *font, int glyph) {
 float pgGetCharWidth(PgFont *font, int c) {
     return pgGetGlyphWidth(font, pgGetGlyph(font, c));
 }
-float pgGetStringWidth(PgFont *font, wchar_t *text, int len) {
+float pgGetStringWidth(PgFont *font, const wchar_t *text, int len) {
     if (len < 0) len = wcslen(text);
     float x = 0;
     for (int i = 0; i < len; i++)
@@ -478,7 +524,15 @@ bool pgIsFontItalic(PgFont *font) {
 bool pgIsFontFixedPitched(PgFont *font) {
     return font->isFixedPitched;
 }
-const wchar_t *pgGetFontFamily(PgFont *font);
+const wchar_t *pgGetFontName(PgFont *font) {
+    return font->name;
+}
+const wchar_t *pgGetFontFamilyName(PgFont *font) {
+    return font->familyName;
+}
+const wchar_t *pgGetFontStyleName(PgFont *font) {
+    return font->styleName;
+}
 float pgFillChar(Pg *g, PgFont *font, float x, float y, int c, uint32_t color) {
     PgPath *path = pgGetCharPath(font, NULL, c);
     if (path) {

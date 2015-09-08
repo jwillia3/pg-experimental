@@ -49,7 +49,7 @@ typedef struct {
     uint16_t nglyphs;
 } MaxpTable;
 typedef struct {
-    uint16_t format, n;
+    uint16_t format, n, offset;
     struct NameTableRecord { uint16_t platform, encoding, language, name, len, offset; } rec[];
 } NameTable;
 typedef struct { uint16_t platform, encoding; uint32_t offset; } CmapSubTable;
@@ -275,10 +275,12 @@ redoHeader:
     otf->loca = loca;
     otf->cmap = (void*)cmap;
     font->ctm = (PgMatrix){ 1, 0, 0, 1, 0, 0};
+    font->nfonts = nfonts;
     
     font->em = nativeu16(head->em);
     otf->longLoca = native16(head->locaFormat);
     otf->nhmtx = nativeu16(hhea->nhmtx);
+    font->weight = nativeu16(os2->weight);
     memmove(font->panose, os2->panose, 10);
     font->ascender = native16(os2->ascender);
     font->descender = native16(os2->descender);
@@ -288,7 +290,67 @@ redoHeader:
     font->isItalic = nativeu16(os2->style) & 0x101; // italic or oblique
     otf->nglyphs = nativeu16(maxp->nglyphs);
     font->isFixedPitched = font->panose[3] == 9;
+    
+    int n = nativeu16(name->n);
+    const uint8_t *name_data = (uint8_t*)name + nativeu16(name->offset);
+    for (int i = 0; i < n; i++) {
+        int platform = nativeu16(name->rec[i].platform);
+        int encoding = nativeu16(name->rec[i].encoding);
+        int offset = nativeu16(name->rec[i].offset);
+        int len = nativeu16(name->rec[i].len);
+        int language = nativeu16(name->rec[i].language);
+        int id = nativeu16(name->rec[i].name);
+        if (platform == 0 || (platform == 3 && (encoding == 0 || encoding == 1) && language == 0x0409)) {
+            if (id == 1 || id == 2 || id == 4 || id == 16) {
+                const uint16_t *source = (uint16_t*)(name_data + offset);
+                uint16_t *output = malloc((len / 2 + 1) * sizeof *output);
+                len /= 2;
+                for (int i = 0; i < len; i++)
+                    output[i] = nativeu16(source[i]);
+                output[len] = 0;
+                if (id == 1)
+                    font->familyName = output;
+                else if (id == 2)
+                    font->styleName = output;
+                else if (id == 4)
+                    font->name = output;
+                else if (id == 16) { // Preferred font family
+                    free((void*) font->familyName);
+                    font->familyName = output;
+                }
+            }
+        }
+        else if (platform == 1 && encoding == 0)
+            if (id == 1 || id == 2 || id == 4 || id == 16) {
+                const uint8_t *source = name_data + offset;
+                uint16_t *output = malloc((len + 1) * sizeof *output);
+                for (int i = 0; i < len; i++)
+                    output[i] = source[i];
+                output[len] = 0;
+                
+                if (id == 1)
+                    font->familyName = output;
+                else if (id == 2)
+                    font->styleName = output;
+                else if (id == 4)
+                    font->name = output;
+                else if (id == 16) { // Preferred font family
+                    free((void*) font->familyName);
+                    font->familyName = output;
+                }
+            }
+    }
+    if (!font->familyName)
+        font->familyName = wcsdup(L"");
+    if (!font->styleName)
+        font->styleName = wcsdup(L"");
+    if (!font->name)
+        font->name = wcsdup(L"");
+    
+    
     return otf;
+}
+static void freeFont(PgFont *font) {
 }
 
 PgOpenTypeFont *pgLoadOpenTypeFont(const void *file, int fontIndex) {
@@ -344,6 +406,7 @@ PgOpenTypeFont *pgLoadOpenTypeFont(const void *file, int fontIndex) {
             break;
         }
     }
+    font->free = freeFont;
     font->getGlyph = getGlyph;
     font->getGlyphPath = getGlyphPath;
     font->getGlyphWidth = getGlyphWidth;

@@ -1,5 +1,8 @@
 void *_pgMapFile(void **hostp, const wchar_t *filename);
 void _pgFreeFileMap(void *host);
+const wchar_t *_pgGetHomeDir();
+const wchar_t *_pgGetConfigDir();
+PgFontFamily *_pgScanFonts();
 
 typedef struct Pw Pw;
 Pw *_pwNew(int width, int height, const wchar_t *title, void (*onSetup)(Pw *win, void *etc), void *etc);

@@ -38,9 +38,11 @@ struct PgFont {
     int weight;
     bool isItalic;
     bool isFixedPitched;
-    const wchar_t *family, name;
+    const wchar_t *familyName, *name, *styleName;
+    int nfonts;
     
     void (*free)(PgFont *font);
+    void (*freeHost)(void *host);
     PgPath *(*getGlyphPath)(PgFont *font, PgPath *path, int glyph);
     int (*getGlyph)(PgFont *font, int glyph);
     float (*getGlyphWidth)(PgFont *font, int glyph);
@@ -54,8 +56,18 @@ typedef struct {
     bool longLoca;
     int nhmtx;
     int nglyphs;
-    int nfonts;
 } PgOpenTypeFont;
+typedef struct {
+    const wchar_t *name;
+    const wchar_t *roman[10];
+    const wchar_t *italic[10];
+    int romanIndex[10];
+    int italicIndex[10];
+} PgFontFamily;
+
+PgFontFamily    *PgFontFamilies;
+int             PgNFontFamilies;
+
 
 static PgPt pgPt(float x, float y) { return (PgPt){x,y}; }
 static PgRect pgRect(PgPt a, PgPt b) { return (PgRect){ .a = a, .b = b }; }
@@ -96,6 +108,10 @@ static PgRect pgRect(PgPt a, PgPt b) { return (PgRect){ .a = a, .b = b }; }
     void pgFillPath(Pg *g, PgPath *path, uint32_t color);
     void pgStrokePath(Pg *g, PgPath *path, float width, uint32_t color);
 // Fonts
+    PgFontFamily *pgScanFonts();
+    PgFont *pgLoadFontHeader(const void *file, int fontIndex);
+    PgFont *pgLoadFont(const void *file, int fontIndex);
+    PgFont *pgOpenFont(const wchar_t *family, int weight, bool italic);
     PgOpenTypeFont *pgLoadOpenTypeFontHeader(const void *file, int fontIndex);
     PgOpenTypeFont *pgLoadOpenTypeFont(const void *file, int fontIndex);
     
@@ -108,10 +124,12 @@ static PgRect pgRect(PgPt a, PgPt b) { return (PgRect){ .a = a, .b = b }; }
     int pgGetFontWeight(PgFont *font);
     bool pgIsFontItalic(PgFont *font);
     bool pgIsFontFixedPitched(PgFont *font);
-    const wchar_t *pgGetFontFamily(PgFont *font);
+    const wchar_t *pgGetFontName(PgFont *font);
+    const wchar_t *pgGetFontFamilyName(PgFont *font);
+    const wchar_t *pgGetFontStyleName(PgFont *font);
     
     
-    PgFont *pgLoadFontFromFile(wchar_t *filename, int index);
+    PgFont *pgLoadFontFromFile(const wchar_t *filename, int index);
     int pgGetGlyph(PgFont *font, int c);
     void pgFreeFont(PgFont *font);
     void pgScaleFont(PgFont *font, float x, float y);
@@ -121,7 +139,7 @@ static PgRect pgRect(PgPt a, PgPt b) { return (PgRect){ .a = a, .b = b }; }
     float pgFillString(Pg *g, PgFont *font, float x, float y, const wchar_t *text, int len, uint32_t color);
     float pgGetCharWidth(PgFont *font, int c);
     float pgGetGlyphWidth(PgFont *font, int c);
-    float pgGetStringWidth(PgFont *font, wchar_t *text, int len);
+    float pgGetStringWidth(PgFont *font, const wchar_t *text, int len);
     void pgFillRect(Pg *g, PgPt a, PgPt b, uint32_t color);
     void pgStrokeRect(Pg *g, PgPt a, PgPt b, float width, uint32_t color);
     void pgStrokeLine(Pg *g, PgPt a, PgPt b, float width, uint32_t color);
