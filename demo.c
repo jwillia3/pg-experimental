@@ -158,7 +158,9 @@ void setup() {
     if (!Font) {
         void *host;
 //        Font = pgOpenFont(L"Arial", 700, false);
-        Font = pgOpenFont(L"Arial", 900, false);
+        puts("");
+        Font = pgOpenFont(L"Arial", 900, true);
+//        Font = pgOpenFont(L"Arial", 300, true);
     }
 }
 static bool onChar(Pw *win, uint32_t state, int c) {
@@ -181,7 +183,8 @@ static void onRepaint(Pw *win) {
     setup();
     
     pgScaleFont(Font, 16.0f, 0);
-//    pgFillString(g, Font, 0, 0, Buf, BufLen, fg);
+    pgFillString(g, Font, 0, 0, Buf, BufLen, fg);
+    return ;
 
     float x = 0;
     float y = 0;
@@ -199,14 +202,14 @@ static void onRepaint(Pw *win) {
                 if (!font)
                     font = Font;
                 wchar_t text[128];
-                swprintf(text, 128, L"%ls %ls", PgFontFamilies[i].name, font->styleName);
+                swprintf(text, 128, L"%ls %ls %d", PgFontFamilies[i].name, font->styleName, font->weight);
                 pgScaleFont(font, fontSize, 0);
                 float tmp = pgGetStringWidth(font, text, -1);
                 if (width < tmp)
                     width = tmp;
                 pgFillString(g, font, x, y, text, -1, font == Font? 0xffffaacc: fg);
                 y += pgGetFontEm(Font) + 2;
-                if (y >= g->height - 2) {
+                if (y >= g->height - 10) {
                     y = 0;
                     x += width + 5;
                 }
@@ -226,8 +229,8 @@ int pwMain() {
     pwLoop();
     return 0;
 }
-//#undef main
-//int main() {
-//    void WinMain();
-//    WinMain();
-//}
+#undef main
+int main() {
+    void WinMain();
+    WinMain();
+}

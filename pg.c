@@ -443,22 +443,19 @@ PgFont *pgOpenFont(const wchar_t *family, int weight, bool italic) {
     pgScanFonts();
     for (int i = 0; i < PgNFontFamilies; i++)
         if (!wcsicmp(family, PgFontFamilies[i].name)) {
-            const wchar_t **set = italic? PgFontFamilies[i].italic: PgFontFamilies[i].roman;
-            const int *indexSet = italic? PgFontFamilies[i].italicIndex: PgFontFamilies[i].romanIndex;
-            for (int i = weight; weight; weight--) {
-                if (!set[weight])
-                    continue;
-                PgFont *font = pgLoadFontFromFile(set[weight], indexSet[weight]);
-                if (font)
-                    return font;
+            for (int j = 0; j < 2; j++) {
+                const wchar_t **set = italic - j? PgFontFamilies[i].italic: PgFontFamilies[i].roman;
+                const int *indexSet = italic - j? PgFontFamilies[i].italicIndex: PgFontFamilies[i].romanIndex;
+                PgFont *font;
+                for (int i = 0; i < 10; i++)
+                {
+                    if (weight + i < 10 && set[weight + i] && (font = pgLoadFontFromFile(set[weight + i], indexSet[weight + i])))
+                        return font;
+                    if (weight - i > 0 && set[weight - i] && (font = pgLoadFontFromFile(set[weight - i], indexSet[weight - i])))
+                        return font;
+                }
             }
-            for (int i = weight + 1; weight < 10; weight++) {
-                if (!set[weight])
-                    continue;
-                PgFont *font = pgLoadFontFromFile(set[weight], indexSet[weight]);
-                if (font)
-                    return font;
-            }
+            break;
         } 
     return NULL;
 }
