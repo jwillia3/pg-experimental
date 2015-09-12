@@ -157,7 +157,8 @@ void setup() {
     
     if (!Font) {
         void *host;
-        Font = pgOpenFont(L"Arial", 700, false);
+//        Font = pgOpenFont(L"Arial", 700, false);
+        Font = pgOpenFont(L"Arial", 900, false);
     }
 }
 static bool onChar(Pw *win, uint32_t state, int c) {
@@ -190,7 +191,7 @@ static void onRepaint(Pw *win) {
         for (int style = 0; style < 2; style++)
             for (int w = 0; w < 10; w++) {
                 if ((!style && !PgFontFamilies[i].roman[w])
-                  || (style && !PgFontFamilies[i].roman[w]))
+                  || (style && !PgFontFamilies[i].italic[w]))
                     continue;
                 PgFont *font = pgLoadFontFromFile(
                     style? PgFontFamilies[i].italic[w]: PgFontFamilies[i].roman[w],
@@ -203,7 +204,7 @@ static void onRepaint(Pw *win) {
                 float tmp = pgGetStringWidth(font, text, -1);
                 if (width < tmp)
                     width = tmp;
-                pgFillString(g, font, x, y, text, -1, fg);
+                pgFillString(g, font, x, y, text, -1, font == Font? 0xffffaacc: fg);
                 y += pgGetFontEm(Font) + 2;
                 if (y >= g->height - 2) {
                     y = 0;
@@ -220,7 +221,6 @@ static void onSetup(Pw *win, void *etc) {
 
 
 int pwMain() {
-    pgScanFonts();
     Pw *win = pwNew(1024, 800, L"Test Window", onSetup, NULL);
     win->onChar = onChar;
     pwLoop();

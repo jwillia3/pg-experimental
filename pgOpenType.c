@@ -301,7 +301,7 @@ redoHeader:
         int language = nativeu16(name->rec[i].language);
         int id = nativeu16(name->rec[i].name);
         if (platform == 0 || (platform == 3 && (encoding == 0 || encoding == 1) && language == 0x0409)) {
-            if (id == 1 || id == 2 || id == 4 || id == 16) {
+            if (id == 1 || id == 2 || id == 4 || id == 16 || id == 17) {
                 const uint16_t *source = (uint16_t*)(name_data + offset);
                 uint16_t *output = malloc((len / 2 + 1) * sizeof *output);
                 len /= 2;
@@ -317,6 +317,10 @@ redoHeader:
                 else if (id == 16) { // Preferred font family
                     free((void*) font->familyName);
                     font->familyName = output;
+                }
+                else if (id == 17) { // Preferred font style
+                    free((void*) font->styleName);
+                    font->styleName = output;
                 }
             }
         }
@@ -337,6 +341,10 @@ redoHeader:
                 else if (id == 16) { // Preferred font family
                     free((void*) font->familyName);
                     font->familyName = output;
+                }
+                else if (id == 17) { // Preferred font style
+                    free((void*) font->styleName);
+                    font->styleName = output;
                 }
             }
     }
