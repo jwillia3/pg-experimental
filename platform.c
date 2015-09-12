@@ -2,10 +2,14 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <winsock2.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
+#include <wchar.h>
 #pragma comment(lib, "ws2_32.lib")
 #include "pg.h"
 #include "platform.h"
@@ -17,6 +21,10 @@ typedef struct {
     HANDLE mapping;
     HANDLE view;
 } Host;
+
+static time_t   FontMemoryCacheTime;
+static time_t   FontFileCacheTime;
+static time_t   FontDirTime;
 
 void *_pgMapFile(void **hostp, const wchar_t *filename) {
     Host *host = *hostp = malloc(sizeof *host);
@@ -157,6 +165,10 @@ PgFontFamily *_pgScanFonts() {
     GetEnvironmentVariable(L"WINDIR", dir, MAX_PATH);
     wcscat(dir, L"/Fonts");
     
+    struct __stat64 statBuf;
+    if (!_wstat64(dir, &statBuf))
+        FontDirTime = statBuf.st_mtime;
+    
     const wchar_t *config = _pgGetConfigDir();
     if (!config)
         return PgFontFamilies;
@@ -164,8 +176,20 @@ PgFontFamily *_pgScanFonts() {
     CreateDirectory(path, NULL);
     wcscat(path, L"/fonts");
     
+    // Load font list from cache file
     FILE *file = _wfopen(path, L"r");
     if (file) {
+        // Make sure that the cache isn't out of date with directory
+        struct stat statBuf;
+        if (!fstat(fileno(file), &statBuf)) {
+            FontFileCacheTime = statBuf.st_mtime;
+            if (FontDirTime > FontFileCacheTime)
+                goto rebuild;
+            
+            if (FontMemoryCacheTime && FontFileCacheTime > FontMemoryCacheTime)
+                goto rebuild;
+        }
+
         wchar_t line[65536];
         wchar_t buf[65536];
         if (fgetws(line, 65536, file))
@@ -194,11 +218,14 @@ PgFontFamily *_pgScanFonts() {
         rebuild:
         fclose(file);
     }
-    
+
+    // Scan font directory for fonts
     PgFontFamilies = NULL;
     PgNFontFamilies = 0;
     _pgScanDirectory(dir, scanPerFile);
+    FontMemoryCacheTime = time(NULL);
     
+    // Write to cache if possible
     file = _wfopen(path, L"w");
     if (file) {
         fwprintf(file, L"%d\n", PgNFontFamilies);
