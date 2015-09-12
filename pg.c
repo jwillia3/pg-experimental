@@ -408,8 +408,15 @@ void pgFillPath(Pg *g, PgPath *path, uint32_t color) {
 void pgStrokePath(Pg *g, PgPath *path, float width, uint32_t color) {
     g->strokePath(g, path, width, color);
 }
-int pgGetGlyph(PgFont *font, int c) {
+int pgGetGlyphNoSubstitute(PgFont *font, int c) {
     return font->getGlyph(font, c);
+}
+int pgGetGlyph(PgFont *font, int c) {
+    int g = pgGetGlyphNoSubstitute(font, c);
+    for (int i = 0; i < font->nsubs; i++)
+        if (font->subs[i].in == g)
+            g = font->subs[i].out;
+    return g;
 }
 PgFontFamily *pgScanFonts() {
     return _pgScanFonts();
@@ -460,6 +467,7 @@ PgFont *pgOpenFont(const wchar_t *family, int weight, bool italic) {
     return NULL;
 }
 void pgFreeFont(PgFont *font) {
+    free(font->subs);
     free((void*) font->styleName);
     free((void*) font->familyName);
     free((void*) font->name);
@@ -529,6 +537,12 @@ const wchar_t *pgGetFontFamilyName(PgFont *font) {
 }
 const wchar_t *pgGetFontStyleName(PgFont *font) {
     return font->styleName;
+}
+void pgSubstituteGlyph(PgFont *font, uint16_t in, uint16_t out) {
+    font->subs = realloc(font->subs, (font->nsubs + 1) * sizeof *font->subs);
+    font->subs[font->nsubs].in = in;
+    font->subs[font->nsubs].out = out;
+    font->nsubs++;
 }
 float pgFillChar(Pg *g, PgFont *font, float x, float y, int c, uint32_t color) {
     PgPath *path = pgGetCharPath(font, NULL, c);

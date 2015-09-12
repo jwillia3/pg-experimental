@@ -157,10 +157,8 @@ void setup() {
     
     if (!Font) {
         void *host;
-//        Font = pgOpenFont(L"Arial", 700, false);
-        puts("");
-        Font = pgOpenFont(L"Arial", 900, true);
-//        Font = pgOpenFont(L"Arial", 300, true);
+        Font = pgOpenFont(L"Arial", 700, false);
+        pgSubstituteGlyph(Font, pgGetGlyph(Font, 't'), pgGetGlyph(Font, '#'));
     }
 }
 static bool onChar(Pw *win, uint32_t state, int c) {
@@ -229,8 +227,8 @@ int pwMain() {
     pwLoop();
     return 0;
 }
-#undef main
-int main() {
-    void WinMain();
-    WinMain();
-}
+//#undef main
+//int main() {
+//    void WinMain();
+//    WinMain();
+//}

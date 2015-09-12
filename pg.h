@@ -40,6 +40,8 @@ struct PgFont {
     bool isFixedPitched;
     const wchar_t *familyName, *name, *styleName;
     int nfonts;
+    struct { uint16_t in, out; } *subs;
+    int nsubs;
     
     void (*free)(PgFont *font);
     void (*freeHost)(void *host);
@@ -131,6 +133,8 @@ static PgRect pgRect(PgPt a, PgPt b) { return (PgRect){ .a = a, .b = b }; }
     
     PgFont *pgLoadFontFromFile(const wchar_t *filename, int index);
     int pgGetGlyph(PgFont *font, int c);
+    int pgGetGlyphNoSubstitute(PgFont *font, int c);
+    void pgSubstituteGlyph(PgFont *font, uint16_t in, uint16_t out);
     void pgFreeFont(PgFont *font);
     void pgScaleFont(PgFont *font, float x, float y);
     PgPath *pgGetGlyphPath(PgFont *font, PgPath *path, int glyph);
