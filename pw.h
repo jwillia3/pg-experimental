@@ -20,6 +20,14 @@ struct Pw {
     void (*update)(Pw *win);
     void (*setTitle)(Pw *win, const wchar_t *title);
 };
+struct {
+    PgFont *titleFont;
+    uint32_t titleBg;
+    uint32_t titleFg;
+    uint32_t borderColor;
+    int borderSize;
+    int titleSize;
+} PwConfig;
 Pw *pwNew(int width, int height, const wchar_t *title, void (*onSetup)(Pw *win, void *etc), void *etc);
 void pwClose(Pw *win);
 void pwResize(Pw *win, int width, int height);

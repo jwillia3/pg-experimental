@@ -11,7 +11,6 @@
 #include "util.h"
 #pragma comment(lib, "gdi32")
 #pragma comment(lib, "user32")
-enum { Chrome = 32 };
 
 const float MouseTolorance = 6;
 
@@ -27,7 +26,6 @@ typedef struct {
     void (*oldFree)(Pg *g);
 } PgDibBitmap;
 
-static PgFont *UiFont;
 static int nOpenWindows;
 
 
@@ -98,46 +96,39 @@ static void setTitle(Pw *win, const wchar_t *title) {
     SetWindowText(((PwGdiWindow*)win)->hwnd, title);
 }
 static void repaintChrome(Pw *win, Pg *g) {
-    const uint32_t titleBarColor = 0xffeeeeee;
-    const uint32_t titleBarTextColor = 0xff666666;
-    const uint32_t borderColor = 0xff666666;
-    const uint32_t titleButtonColor = 0xffdddddd;
-    const float titleSize = Chrome / 2.0f;
-    
-    if (!UiFont) {
-        void *host;
-        UiFont = (PgFont*)pgLoadOpenTypeFont(
-            _pgMapFile(&host, L"C:/Windows/Fonts/Arial.ttf"),
-            0);
-    }
     
     pgIdentity(g);
+    pgFillRect(g,
+        pgPt(PwConfig.borderSize, 0.0f),
+        pgPt(g->width - PwConfig.borderSize, PwConfig.titleSize),
+        PwConfig.titleBg);
     
-    pgFillRect(g, pgPt(-1, -1), pgPt(g->width, Chrome), titleBarColor);
-    
-    pgScaleFont(UiFont, titleSize, 0);
-    float width = pgGetStringWidth(UiFont, win->title, -1);
-    pgFillString(g, UiFont,
+    pgScaleFont(PwConfig.titleFont, PwConfig.titleSize * 0.50f, 0.0f);
+    float width = pgGetStringWidth(PwConfig.titleFont, win->title, -1);
+    pgFillString(g, PwConfig.titleFont,
         g->width / 2.0f - width / 2.0f,
-        Chrome / 2.0f - titleSize / 2.0f,
+        PwConfig.titleSize / 2.0f - pgGetFontEm(PwConfig.titleFont) / 2.0f,
         win->title, -1,
-        titleBarTextColor);
+        PwConfig.titleFg);
     
-    const float Chrome1_4 = Chrome * 3.0f / 8.0f;
-    const float Chrome3_4 = Chrome * 5.0f / 8.0f;
-    pgTranslate(g, g->width - Chrome * 3, 0);
-    pgFillRect(g, pgPt(0, 0), pgPt(Chrome * 3, Chrome), titleButtonColor);
-    pgStrokeLine(g, pgPt(Chrome1_4, Chrome3_4), pgPt(Chrome3_4, Chrome3_4), 5.0f, titleBarTextColor);
-    pgTranslate(g, Chrome, 0);
-    pgStrokeRect(g, pgPt(Chrome1_4, Chrome1_4), pgPt(Chrome3_4, Chrome3_4), 5.0f, titleBarTextColor);
-    pgTranslate(g, Chrome, 0);
-    pgStrokeLine(g, pgPt(Chrome1_4, Chrome1_4), pgPt(Chrome3_4, Chrome3_4), 5.0f, titleBarTextColor);
-    pgStrokeLine(g, pgPt(Chrome3_4, Chrome1_4), pgPt(Chrome1_4, Chrome3_4), 5.0f, titleBarTextColor);
+    const float _1_4 = 32 * 3.0f / 8.0f;
+    const float _3_4 = 32 * 5.0f / 8.0f;
+    pgTranslate(g, g->width - 32.0f, 0.0f);
+    pgStrokeLine(g, pgPt(_1_4, _1_4), pgPt(_3_4, _3_4), 5.0f, PwConfig.borderColor);
+    pgStrokeLine(g, pgPt(_3_4, _1_4), pgPt(_1_4, _3_4), 5.0f, PwConfig.borderColor);
+    
+    pgTranslate(g, -32.0f, 0.0f);
+    pgStrokeRect(g, pgPt(_1_4, _1_4), pgPt(_3_4, _3_4), 5.0f, PwConfig.borderColor);
+    
+    pgTranslate(g, -32.0f, 0.0f);
+    pgStrokeRect(g, pgPt(_1_4, _3_4), pgPt(_3_4, _3_4), 5.0f, PwConfig.borderColor);
+    
     pgIdentity(g);
-    pgStrokeLine(g, pgPt(0.5f, 0.5f), pgPt(0.5f, g->height - 0.5f), 1.0f, borderColor);
-    pgStrokeLine(g, pgPt(g->width - 0.5f, 0.5f), pgPt(g->width - 0.5f, g->height - 0.5f), 1.0f, borderColor);
-    pgStrokeLine(g, pgPt(0.5f, 0.5f), pgPt(g->width - 0.5f, 0.5f), 1.0f, borderColor);
-    pgStrokeLine(g, pgPt(0.5f, g->height - 0.5f), pgPt(g->width - 0.5f, g->height - 0.5f), 1.0f, borderColor);
+    pgStrokeLine(g, pgPt(0.5f, 0.5f), pgPt(g->width - 0.5f, 0.5f), 1.0f, PwConfig.borderColor);
+    pgStrokeLine(g, pgPt(0.5f, g->height - 0.5f), pgPt(g->width - 0.5f, g->height - 0.5f), 1.0f, PwConfig.borderColor);
+    pgStrokeLine(g, pgPt(0.5f, 0.5f), pgPt(0.5f, g->height - 0.5f), 1.0f, PwConfig.borderColor);
+    pgStrokeLine(g, pgPt(g->width - 0.5f, 0.5f), pgPt(g->width - 0.5f, g->height - 0.5f), 1.0f, PwConfig.borderColor);
+    
 }
 static void repaint(PwGdiWindow *gdi) {
     Pw *win = &gdi->_;
@@ -209,10 +200,10 @@ static LRESULT WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
                     HTRIGHT;
             if (g->height - y < MouseTolorance)
                 return HTBOTTOM;
-            if (y < Chrome) {
-                if (x >= g->width - Chrome) return HTCLOSE;
-                if (x >= g->width - Chrome * 2) return HTMAXBUTTON;
-                if (x >= g->width - Chrome * 3) return HTMINBUTTON;
+            if (y < PwConfig.titleSize) {
+                if (x >= g->width - PwConfig.titleSize) return HTCLOSE;
+                if (x >= g->width - PwConfig.titleSize * 2) return HTMAXBUTTON;
+                if (x >= g->width - PwConfig.titleSize * 3) return HTMINBUTTON;
                 if (y < MouseTolorance) return HTTOP;
                 return HTCAPTION;
             }
@@ -226,7 +217,7 @@ static LRESULT WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
             pgFreeCanvas(win->g);
             win->g = pgSubsectionCanvas(win->chromeCanvas,
                 pgRect(
-                    pgPt(1, Chrome),
+                    pgPt(1, PwConfig.titleSize),
                     pgPt(win->chromeCanvas->width - 1, win->chromeCanvas->height - 1)));
             if (win->onResize)
                 win->onResize(win, win->g->width, win->g->height);
@@ -274,12 +265,20 @@ Pw *pwOpenGdiWindow(int width, int height, const wchar_t *title, void (*onSetup)
         WS_EX_LAYERED,
         L"GenericWindow", title,
         WS_OVERLAPPEDWINDOW|WS_VISIBLE,
-        CW_USEDEFAULT, CW_USEDEFAULT, width, height + Chrome,
+        CW_USEDEFAULT, CW_USEDEFAULT, width, height + PwConfig.titleSize,
         NULL, NULL, GetModuleHandle(NULL), (void*[]){ gdi, onSetup, etc });
     return win;
 }
 Pw *_pwNew(int width, int height, const wchar_t *title, void (*onSetup)(Pw *win, void *etc), void *etc) {
     return pwOpenGdiWindow(width, height, title, onSetup, etc);
+}
+static void init() {
+    PwConfig.titleFont = pgOpenFont(L"Arial", 600, false);
+    PwConfig.titleBg = 0xffeeeeee;
+    PwConfig.titleFg = 0xff666666;
+    PwConfig.borderColor = 0xff333333;
+    PwConfig.titleSize = 32;
+    PwConfig.borderSize = 1;
 }
 void _pwLoop() {
     MSG msg;
@@ -298,5 +297,6 @@ int WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
         SetProcessUserModeExceptionPolicy(dwFlags & ~1);
     }
     extern int main();
+    init();
     return main();
 }
