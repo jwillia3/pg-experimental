@@ -1,302 +1,239 @@
 #define UNICODE
 #define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include <winsock2.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
-#include "pg.h"
-#include "pw.h"
-#include "platform.h"
-#include "util.h"
-#pragma comment(lib, "gdi32")
-#pragma comment(lib, "user32")
+#include <string.h>
+#include <wchar.h>
+#include <windows.h>
+#include <pg.h>
+#include <pw.h>
+#include <platform.h>
+#pragma comment(lib, "user32.lib")
+#pragma comment(lib, "gdi32.lib")
 
-const float MouseTolorance = 6;
-
-typedef struct PwGdiWindow PwGdiWindow;
-struct PwGdiWindow {
-    Pw _;
-    HWND hwnd;
-};
 typedef struct {
-    Pg g;
+    HWND hwnd;
+    Pg *client;
+    Pg *chrome;
     HBITMAP dib;
-    void (*oldResize)(Pg *g, int width, int height);
-    void (*oldFree)(Pg *g);
-} PgDibBitmap;
+} Window;
 
-static int nOpenWindows;
+enum {
+    MouseTolorance = 5
+};
 
-
-static void dib_resize(Pg *_g, int width, int height) {
-    PgDibBitmap *g = (void*)_g;
-    if (!_g->borrowed) {
-        g->g.bmp = NULL;
-        g->oldResize(&g->g, width, height);
-        free(g->g.bmp);
-        DeleteObject(g->dib);
-        g->dib = CreateDIBSection(NULL,
-            (BITMAPINFO*)&(BITMAPINFOHEADER){
-                sizeof(BITMAPINFOHEADER),
-                width, -height, 1, 32, 0, width * height * 4,
-                96, 96, -1, -1
-            },
-            DIB_RGB_COLORS,
-            &(void*)g->g.bmp,
-            NULL, 0);
-    }
-}
-static void dib_free(Pg *_g) {
-    PgDibBitmap *g = (void*)_g;
-    if (!_g->borrowed) {
-        g->g.bmp = NULL;
-        g->oldFree(&g->g);
-        DeleteObject(g->dib);
-    }
-    free(g);
-}
-static Pg *dib_subsection(Pg *original, PgRect rect) {
-    PgDibBitmap *dib = malloc(sizeof *dib);
-    Pg *g = &dib->g;
-    *dib = *(PgDibBitmap*)original;
-    rect.a.x = clamp(0, rect.a.x, g->width);
-    rect.b.x = clamp(0, rect.b.x, g->width);
-    g->width = clamp(0, rect.b.x - rect.a.x, g->width);
-    g->height = clamp(0, rect.b.y - rect.a.y, g->height);
-    g->clip.b.x = min(g->clip.b.x, g->width);
-    g->clip.b.y = min(g->clip.b.y, g->height);
-    g->borrowed = true;
-    g->bmp += (int)rect.a.x + (int)rect.a.y * g->stride;
-    return g;
-}
-
-
-Pg *pgNewGdiCanvas(int width, int height) {
-    PgDibBitmap *g = (PgDibBitmap*)pgNewBitmapCanvas(0, 0);
-    g = realloc(g, sizeof *g);
-    g->oldResize = g->g.resize;
-    g->oldFree = g->g.free;
-    g->g.resize = dib_resize;
-    g->g.free = dib_free;
-    g->g.subsection = dib_subsection;
-    g->dib = NULL;
-    g->g.resize(&g->g, width, height);
-    return &g->g;
-}
-static void close(Pw *win) {
-    DestroyWindow(((PwGdiWindow*)win)->hwnd);
-}
-static void resize(Pw *win, int width, int height) {
-    SetWindowPos(((PwGdiWindow*)win)->hwnd,
-        NULL, 0, 0, width, height,
-        SWP_NOACTIVATE|SWP_NOMOVE|SWP_NOZORDER);
-}
-static void setTitle(Pw *win, const wchar_t *title) {
-    SetWindowText(((PwGdiWindow*)win)->hwnd, title);
-}
-static void repaintChrome(Pw *win, Pg *g) {
+static void drawChrome(Pw *pw, Pg *g) {
+    Window *win = pw->sys;
     
-    pgIdentity(g);
+    int len = GetWindowTextLength(win->hwnd);
+    wchar_t *title = malloc((len + 1) * sizeof (wchar_t));
+    GetWindowText(win->hwnd, title, len + 1);
+    
+    float width = pgGetStringWidth(PwConf.font, title, -1);
     pgFillRect(g,
-        pgPt(PwConfig.borderSize, 0.0f),
-        pgPt(g->width - PwConfig.borderSize, PwConfig.titleSize),
-        PwConfig.titleBg);
+        pgPt(1.0f, 0.0f),
+        pgPt(g->width, 32.0f),
+        PwConf.titleBg);
+    pgFillString(g, PwConf.font,
+        g->width / 2.0f - width / 2.0f, 32.0f / 2.0f - pgGetFontEm(PwConf.font) / 2.0f,
+        title, len, PwConf.titleFg);
+    free(title);
     
-    pgScaleFont(PwConfig.titleFont, PwConfig.titleSize * 0.50f, 0.0f);
-    float width = pgGetStringWidth(PwConfig.titleFont, win->title, -1);
-    pgFillString(g, PwConfig.titleFont,
-        g->width / 2.0f - width / 2.0f,
-        PwConfig.titleSize / 2.0f - pgGetFontEm(PwConfig.titleFont) / 2.0f,
-        win->title, -1,
-        PwConfig.titleFg);
-    
-    const float _1_4 = 32 * 3.0f / 8.0f;
-    const float _3_4 = 32 * 5.0f / 8.0f;
-    pgTranslate(g, g->width - 32.0f, 0.0f);
-    pgStrokeLine(g, pgPt(_1_4, _1_4), pgPt(_3_4, _3_4), 5.0f, PwConfig.borderColor);
-    pgStrokeLine(g, pgPt(_3_4, _1_4), pgPt(_1_4, _3_4), 5.0f, PwConfig.borderColor);
-    
-    pgTranslate(g, -32.0f, 0.0f);
-    pgStrokeRect(g, pgPt(_1_4, _1_4), pgPt(_3_4, _3_4), 5.0f, PwConfig.borderColor);
-    
-    pgTranslate(g, -32.0f, 0.0f);
-    pgStrokeRect(g, pgPt(_1_4, _3_4), pgPt(_3_4, _3_4), 5.0f, PwConfig.borderColor);
-    
-    pgIdentity(g);
-    pgStrokeLine(g, pgPt(0.5f, 0.5f), pgPt(g->width - 0.5f, 0.5f), 1.0f, PwConfig.borderColor);
-    pgStrokeLine(g, pgPt(0.5f, g->height - 0.5f), pgPt(g->width - 0.5f, g->height - 0.5f), 1.0f, PwConfig.borderColor);
-    pgStrokeLine(g, pgPt(0.5f, 0.5f), pgPt(0.5f, g->height - 0.5f), 1.0f, PwConfig.borderColor);
-    pgStrokeLine(g, pgPt(g->width - 0.5f, 0.5f), pgPt(g->width - 0.5f, g->height - 0.5f), 1.0f, PwConfig.borderColor);
-    
+    const float _1_4 = 32.0f * 3.0f / 8.0f;
+    const float _3_4 = 32.0f * 5.0f / 8.0f;
+    pgTranslate(g, g->width - 32.0f * 3, 0.0f);
+    pgFillRect(g, pgPt(0.0f, 0.0f), pgPt(32.0f * 3.0f, 32.0f),
+        pgBlend(PwConf.border, PwConf.titleBg, 128));
+    pgStrokeLine(g, pgPt(_1_4, _3_4), pgPt(_3_4, _3_4), 5.0f, PwConf.border);
+    pgTranslate(g, 32.0f, 0.0f);
+    pgStrokeRect(g, pgPt(_1_4, _1_4), pgPt(_3_4, _3_4), 5.0f, PwConf.border);
+    pgTranslate(g, 32.0f, 0.0f);
+    pgStrokeLine(g, pgPt(_1_4, _1_4), pgPt(_3_4, _3_4), 5.0f, PwConf.border);
+    pgStrokeLine(g, pgPt(_3_4, _1_4), pgPt(_1_4, _3_4), 5.0f, PwConf.border);
 }
-static void repaint(PwGdiWindow *gdi) {
-    Pw *win = &gdi->_;
-    repaintChrome(win, win->chromeCanvas);
-    if (win->onRepaint)
-        win->onRepaint(win);
+
+static void _event(Pw *pw, int msg, PwEventArgs *e) {
 }
-static void update(Pw *win) {
-    PwGdiWindow *gdi = (PwGdiWindow*)win;
-    repaint(gdi);
-    Pg *g = gdi->_.chromeCanvas;
-    HDC wdc = GetDC(gdi->hwnd);
-    HDC cdc = CreateCompatibleDC(wdc);
-    HGDIOBJ old = SelectObject(cdc, ((PgDibBitmap*)g)->dib);
-    UpdateLayeredWindow(gdi->hwnd, wdc, NULL,
-        &(SIZE){ g->width, g->height },
-        cdc, &(POINT){ 0, 0 }, 0, NULL, ULW_OPAQUE);
-    SelectObject(cdc, old);
-    ReleaseDC(gdi->hwnd, wdc);
-    DeleteDC(cdc);
-}
-static uint32_t state() {
-    return  (GetKeyState(VK_LBUTTON)? 0x01: 0) |
-            (GetKeyState(VK_MBUTTON)? 0x02: 0) |
-            (GetKeyState(VK_RBUTTON)? 0x04: 0) |
-            (GetKeyState(VK_SHIFT)? 0x10: 0) |
-            (GetAsyncKeyState(VK_MENU)? 0x20: 0) |
-            (GetKeyState(VK_CONTROL)? 0x40: 0);
-}
-static LRESULT WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
-    PwGdiWindow *gdi = GetProp(hwnd, L"pw");
-    Pw *win = &gdi->_;
-    PAINTSTRUCT ps;
-    
+static void _exec(Pw *pw, int msg, PwEventArgs *e) {
+    Window *win = pw->sys;
     switch (msg) {
+    case PWE_DRAW:
+        drawChrome(pw, ((Window*) pw->sys)->chrome);
+        pw->event(pw, msg, e);
+        
+        HDC dc = GetWindowDC(win->hwnd);
+        HDC cdc = CreateCompatibleDC(dc);
+        HGDIOBJ old = SelectObject(cdc, win->dib);
+        UpdateLayeredWindow(win->hwnd, dc, NULL,
+            &(SIZE) { win->chrome->width, win->chrome->height },
+            cdc, &(POINT) { 0, 0 }, 0, NULL, ULW_OPAQUE);
+        SelectObject(cdc, old);
+        DeleteDC(cdc);
+        ReleaseDC(win->hwnd, dc);
+        break;
+    case PWE_SIZE:
+        SetWindowPos(win->hwnd, NULL, 0, 0, e->size.width, e->size.height,
+            SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOZORDER);
+        break;
+    case PWE_CLOSE:
+        DestroyWindow(win->hwnd);
+        break;
+    }
+}
+static void _sysEvent(Pw *pw, int msg, PwEventArgs *e) {
+    Window *win = pw->sys;
+    switch (msg) {
+    case PWE_DRAW:
+        drawChrome(pw, win->chrome);
+        break;
+    case PWE_KEY_DOWN:
+        if (e->key.alt)
+            if (e->key.key == VK_F4) {
+                PostMessage(win->hwnd, WM_SYSCOMMAND, SC_CLOSE, 0);
+                return;
+            }
+        pw->event(pw, msg, e);
+        break;
+    
+    case PWE_SIZE:
+        if (win->chrome)
+            pgFreeCanvas(win->chrome),
+            pgFreeCanvas(win->client),
+            DeleteObject(win->dib);
+        win->chrome = pgNewBitmapCanvas(e->size.width, e->size.height);
+        free(win->chrome->bmp);
+        win->chrome->bmp = NULL;
+        win->chrome->borrowed = true;
+        win->dib = CreateDIBSection(NULL,
+            &(BITMAPINFO) {
+                .bmiHeader = {
+                    sizeof (BITMAPINFOHEADER),
+                    e->size.width,
+                    -e->size.height,
+                    1, 32, 0, e->size.width * e->size.height * 4,
+                    96, 96, -1, -1 }},
+            DIB_RGB_COLORS,
+            &win->chrome->bmp,
+            NULL, 0);
+        win->client = pgSubsectionCanvas(win->chrome,
+            pgRect(pgPt(1.0f, 32.0f), pgPt(e->size.width - 1.0f, e->size.height - 1.0f)));
+        pw->rect = pgRect(pgPt(0, 0), pgPt(e->size.width, e->size.height));
+        pw->exec(pw, PWE_DRAW, &(PwEventArgs) { .draw.g = win->client });
+        break;
+    default:
+        pw->event(pw, msg, e);
+    }
+}
+
+LRESULT WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
+    Pw *pw = GetProp(hwnd, L"Pw");
+    Window *win = pw? pw->sys: NULL;
+    switch (msg) {
+    case WM_NCHITTEST:
+        RECT r;
+        GetWindowRect(hwnd, &r);
+        int x = LOWORD(lparam) - r.left;
+        int y = HIWORD(lparam) - r.top;
+        int width = win->chrome->width;
+        int height = win->chrome->height;
+        
+        if (x < MouseTolorance)
+            return y < MouseTolorance? HTTOPLEFT:
+                height - y < MouseTolorance? HTBOTTOMLEFT:
+                HTLEFT;
+        if (width - x < MouseTolorance)
+            return y < MouseTolorance? HTTOPRIGHT:
+                height - y < MouseTolorance? HTBOTTOMRIGHT:
+                HTRIGHT;
+        if (height - y < MouseTolorance)
+            return HTBOTTOM;
+        if (y < 32)
+            if (abs(width - x) < 32)
+                return HTCLOSE;
+            else if (abs(width - x) < 32 * 2)
+                return HTMAXBUTTON;
+            else if (abs(width - x) < 32 * 3)
+                return HTMINBUTTON;
+            else if (y < MouseTolorance)
+                return HTTOP;
+            else return HTCAPTION;
+        return HTCLIENT;
+    case WM_SIZE:
+        if (pw)
+            pw->sysEvent(pw, PWE_SIZE, &(PwEventArgs) {
+                .size = {
+                    .width = LOWORD(lparam),
+                    .height = HIWORD(lparam),
+                }});
+        return 0;
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN:
-        return win->onKeyDown? win->onKeyDown(win, state(), wparam): true;
-    case WM_KEYUP:
-    case WM_SYSKEYUP:
-        return win->onKeyUp? win->onKeyUp(win, state(), wparam): true;
-    case WM_CHAR:
-    case WM_SYSCHAR:
-        if (win->onChar? win->onChar(win, state(), wparam): true)
-            break;
+        pw->sysEvent(pw, PWE_KEY_DOWN, &(PwEventArgs) {
+            .key = {
+                .alt = lparam & (1 << 29),
+                .shift = GetKeyState(VK_SHIFT) & 0x8000,
+                .ctl = GetKeyState(VK_CONTROL) & 0x8000,
+                .key = wparam
+            }});
         return 0;
     case WM_LBUTTONDOWN:
-    case WM_LBUTTONUP:
     case WM_MBUTTONDOWN:
-    case WM_MBUTTONUP:
     case WM_RBUTTONDOWN:
-    case WM_RBUTTONUP:
-        return win->onClick? win->onClick(win, state()): true;
+        pw->sysEvent(pw, PWE_KEY_DOWN, &(PwEventArgs) {
+            .mouse = {
+                .alt = lparam & (1 << 29),
+                .shift = GetKeyState(VK_SHIFT) & 0x8000,
+                .ctl = GetKeyState(VK_CONTROL) & 0x8000,
+                .at = pgPt(LOWORD(lparam), HIWORD(lparam))
+            }});
+        return 0;
     
-    case WM_NCHITTEST: {
-            RECT r;
-            Pg *g = win->chromeCanvas;
-            GetWindowRect(hwnd, &r);
-            int x = LOWORD(lparam) - r.left;
-            int y = HIWORD(lparam) - r.top;
-            
-            if (x < MouseTolorance)
-                return y < MouseTolorance? HTTOPLEFT:
-                    g->height - y < MouseTolorance? HTBOTTOMLEFT:
-                    HTLEFT;
-            if (g->width - x < MouseTolorance)
-                return y < MouseTolorance? HTTOPRIGHT:
-                    g->height - y < MouseTolorance? HTBOTTOMRIGHT:
-                    HTRIGHT;
-            if (g->height - y < MouseTolorance)
-                return HTBOTTOM;
-            if (y < PwConfig.titleSize) {
-                if (x >= g->width - PwConfig.titleSize) return HTCLOSE;
-                if (x >= g->width - PwConfig.titleSize * 2) return HTMAXBUTTON;
-                if (x >= g->width - PwConfig.titleSize * 3) return HTMINBUTTON;
-                if (y < MouseTolorance) return HTTOP;
-                return HTCAPTION;
-            }
-            return HTCLIENT;
-        }
-        
-    case WM_SIZE: {
-            RECT r;
-            GetWindowRect(hwnd, &r);
-            pgResizeCanvas(win->chromeCanvas, r.right - r.left, r.bottom - r.top);
-            pgFreeCanvas(win->g);
-            win->g = pgSubsectionCanvas(win->chromeCanvas,
-                pgRect(
-                    pgPt(1, PwConfig.titleSize),
-                    pgPt(win->chromeCanvas->width - 1, win->chromeCanvas->height - 1)));
-            if (win->onResize)
-                win->onResize(win, win->g->width, win->g->height);
-            update(win);
-            return 0;
-        }
-    case WM_CREATE:
-        nOpenWindows++;
-        gdi = ((void**)((CREATESTRUCT*)lparam)->lpCreateParams)[0];
-        void (*setup)(Pw*,void*), *etc;
-        setup = ((void**)((CREATESTRUCT*)lparam)->lpCreateParams)[1];
-        etc = ((void**)((CREATESTRUCT*)lparam)->lpCreateParams)[2];
-        win = &gdi->_;
-        SetProp(hwnd, L"pw", gdi);
-        gdi->hwnd = hwnd;
-        win->chromeCanvas = pgNewGdiCanvas(0, 0);
-        win->g = pgSubsectionCanvas(win->chromeCanvas, (PgRect){ 0,0,0,0 });
-        if (setup)
-            setup(win, etc);
-        return 0;
-    case WM_ERASEBKGND:
-        return 0;
     case WM_DESTROY:
-        if (!--nOpenWindows)
-            PostQuitMessage(0);
+        PostQuitMessage(0);
         return 0;
     }
     return DefWindowProc(hwnd, msg, wparam, lparam);
 }
 
-Pw *pwOpenGdiWindow(int width, int height, const wchar_t *title, void (*onSetup)(Pw *win, void *etc), void *etc) {
-    RegisterClass(&(WNDCLASS){ CS_HREDRAW|CS_VREDRAW, WndProc, 0, 0,
+Pw *pwNewWindow(int width, int height, void (*event)(Pw *pw, int msg, PwEventArgs *e)) {
+    Pw *pw = calloc(1, sizeof *pw);
+    pw->event = event? event: _event;
+    pw->sysEvent = _sysEvent;
+    pw->exec = _exec;
+    Window *win = calloc(1, sizeof *win);
+    pw->sys = win;
+    win->hwnd = CreateWindowEx(
+        WS_EX_LAYERED,
+        L"Pw", L"Window",
+        WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+        CW_USEDEFAULT, CW_USEDEFAULT, 100, 100,
+        NULL, NULL, GetModuleHandle(NULL), NULL);
+    SetProp(win->hwnd, L"Pw", pw);
+    pwSize(pw, width, height);
+    return pw;
+}
+
+bool pwWaitMessage() {
+    MSG msg;
+    if (!GetMessage(&msg, NULL, 0, 0))
+        return false;
+    DispatchMessage(&msg);
+    return true;
+}
+
+static void init() {
+    WNDCLASS wc = { CS_HREDRAW|CS_VREDRAW, WndProc, 0, 0,
         GetModuleHandle(NULL), LoadIcon(NULL, IDI_APPLICATION),
         LoadCursor(NULL, IDC_ARROW), (HBRUSH)(COLOR_WINDOW + 1),
-        NULL, L"GenericWindow" });
-    
-    PwGdiWindow *gdi = calloc(1, sizeof *gdi);
-    Pw *win = &gdi->_;
-    win->title = wcsdup(title);
-    win->update = update;
-    win->setTitle = setTitle;
-    win->resize = resize;
-    win->close = close;
-    gdi->hwnd = CreateWindowEx(
-        WS_EX_LAYERED,
-        L"GenericWindow", title,
-        WS_OVERLAPPEDWINDOW|WS_VISIBLE,
-        CW_USEDEFAULT, CW_USEDEFAULT, width, height + PwConfig.titleSize,
-        NULL, NULL, GetModuleHandle(NULL), (void*[]){ gdi, onSetup, etc });
-    return win;
+        NULL, L"Pw" };
+    RegisterClass(&wc);
 }
-Pw *_pwNew(int width, int height, const wchar_t *title, void (*onSetup)(Pw *win, void *etc), void *etc) {
-    return pwOpenGdiWindow(width, height, title, onSetup, etc);
-}
-static void init() {
-    PwConfig.titleFont = pgOpenFont(L"Arial", 600, false);
-    PwConfig.titleBg = 0xffeeeeee;
-    PwConfig.titleFg = 0xff666666;
-    PwConfig.borderColor = 0xff333333;
-    PwConfig.titleSize = 32;
-    PwConfig.borderSize = 1;
-}
-void _pwLoop() {
-    MSG msg;
-    while (GetMessage(&msg, NULL, 0, 0)) {
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
-    }
-}
+
 int WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
-    HINSTANCE kernel32 = LoadLibrary(L"kernel32.dll");
-    BOOL (*GetProcessUserModeExceptionPolicy)(DWORD*) = kernel32? (void*)GetProcAddress(kernel32, "GetProcessUserModeExceptionPolicy"): 0;
-    BOOL (*SetProcessUserModeExceptionPolicy)(DWORD) = kernel32? (void*)GetProcAddress(kernel32, "SetProcessUserModeExceptionPolicy"): 0;
-    DWORD dwFlags;
-    if (GetProcessUserModeExceptionPolicy) {
-        GetProcessUserModeExceptionPolicy(&dwFlags);
-        SetProcessUserModeExceptionPolicy(dwFlags & ~1);
-    }
-    extern int main();
     init();
-    return main();
+    _pwInit();
+    extern int pwMain();
+    return pwMain();
 }

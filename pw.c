@@ -7,23 +7,28 @@
 #include "pw.h"
 #include "platform.h"
 
-void pwClose(Pw *win) {
-    win->close(win);
+
+void _pwInit() {
+    PwConf.font = pgOpenFont(L"Arial", 600, false);
+    PwConf.titleBg = 0xffeeeeee;
+    PwConf.titleFg = 0xff666666;
+    PwConf.border = 0xff333333;
+    PwConf.bg = 0xffeeeeee;
+    PwConf.fg = 0xff666666;
+    PwConf.accent = 0xffffaacc;
+    pgScaleFont(PwConf.font, 16.0f, 0);
 }
-void pwResize(Pw *win, int width, int height) {
-    win->resize(win, width, height);
+
+void pwExec(Pw *pw, int msg, PwEventArgs e) {
+    pw->exec(pw, msg, &e);
 }
-void pwUpdate(Pw *win) {
-    win->update(win);
+void pwSize(Pw *pw, int width, int height) {
+    pwExec(pw, PWE_SIZE, (PwEventArgs) {
+        .size = {
+            .width = width,
+            .height = height,
+        }});
 }
-void pwSetTitle(Pw *win, const wchar_t *title) {
-    free(win->title);
-    win->title = wcsdup(title);
-    win->setTitle(win, win->title);
-}
-void pwLoop() {
-    _pwLoop();
-}
-Pw *pwNew(int width, int height, const wchar_t *title, void (*onSetup)(Pw *win, void *etc), void *etc) {
-    return _pwNew(width, height, title, onSetup, etc);
+void pwClose(Pw *pw) {
+    pwExec(pw, PWE_CLOSE, (PwEventArgs) { 0 });
 }

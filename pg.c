@@ -117,6 +117,9 @@ static uint32_t blend(uint32_t fg, uint32_t bg, uint32_t a) {
                     0x00ff0000;
     return (rb | g) >> 8;
 }
+uint32_t pgBlend(uint32_t fg, uint32_t bg, uint32_t a) {
+    return blend(fg, bg, a);
+}
 
 static void bmp_clear(Pg *g, uint32_t color) {
     if (g->stride == g->width)

@@ -79,6 +79,7 @@ int             PgNFontFamilies;
 static PgPt pgPt(float x, float y) { return (PgPt){x,y}; }
 static PgRect pgRect(PgPt a, PgPt b) { return (PgRect){ .a = a, .b = b }; }
 unsigned pgStepUtf8(const uint8_t **input);
+uint32_t pgBlend(uint32_t fg, uint32_t bg, uint32_t a);
 
 // CANVAS MANAGEMENT
     Pg *pgNewBitmapCanvas(int width, int height);
