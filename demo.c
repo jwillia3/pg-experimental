@@ -148,8 +148,8 @@ void pgStrokeSvgPath(Pg *g, const char *svg, float width, uint32_t color) {
 }
 
 PgPath *SvgPath[sizeof TestSVG / sizeof *TestSVG];
-wchar_t Buf[256] = L"Test";
-int BufLen = 4;
+wchar_t Buf[1024*1024] = L"0123456789";
+int BufLen = 10;
 void setup() {
     if (SvgPath[0]) return;
     for (int i = 0; TestSVG[i]; i++)
@@ -157,14 +157,31 @@ void setup() {
     
     if (!Font) {
         void *host;
-        Font = pgOpenFont(L"Arial", 700, false);
-        pgSubstituteGlyph(Font, pgGetGlyph(Font, 't'), pgGetGlyph(Font, '#'));
+//        Font = pgOpenFont(L"Source Sans Pro", 950, false);
+//        Font = pgOpenFont(L"Fira Sans", 650, false);
+//        Font = pgOpenFont(L"Consolas", 400, false);
+//        Font = pgOpenFont(L"Cambria", 400, false);
+        Font = pgOpenFont(L"Arial", 400, false);
+        if (!Font)
+            Font = pgOpenFont(L"Arial", 700, false);
+        uint32_t *features = pgGetFontFeatures(Font);
+        for (int i = 0; features[i]; i++) {
+            Buf[BufLen++] = '\n';
+            Buf[BufLen++] = ((char*) &features[i])[3];
+            Buf[BufLen++] = ((char*) &features[i])[2];
+            Buf[BufLen++] = ((char*) &features[i])[1];
+            Buf[BufLen++] = ((char*) &features[i])[0];
+        }
+        pgSetFontFeatures(Font, (uint32_t[]) { 'onum', 'zero', 0 });
+//        pgSetFontFeatures(Font, pgGetFontFeatures(Font));
     }
 }
 static bool onChar(Pw *win, uint32_t state, int c) {
     if (c == 8) {
         if (BufLen) BufLen--;
     }
+    else if (c == '\n' || c == '\r')
+        Buf[BufLen++] = '\n';
     else if (c == 23) // ^W
         win->close(win);
     else if (c < 32);
@@ -181,7 +198,33 @@ static void onRepaint(Pw *win) {
     setup();
     
     pgScaleFont(Font, 16.0f, 0);
-    pgFillString(g, Font, 0, 0, Buf, BufLen, fg);
+    {
+        float x = 0;
+        float y = 0;
+        for (int i = 0; i < BufLen; i++) {
+            if (Buf[i] == '\n') {
+                x = 0, y += pgGetFontEm(Font);
+                continue;
+            }
+            if (x + pgGetCharWidth(Font, Buf[i]) >= g->width) {
+                x = 0;
+                y += pgGetFontEm(Font);
+            }
+            x = pgFillChar(g, Font, x, y, Buf[i], fg);
+        }
+        
+        for (int i = 0; i < Font->nsubs; i++) {
+            char buf[64];
+            y += pgGetFontEm(Font) + 2;
+            sprintf(buf, "%04x  ", Font->subs[i].in);
+            x = pgFillUtf8(g, Font, 0, y, buf, -1, fg);
+            x = pgFillGlyph(g, Font, x, y, Font->subs[i].in, fg);
+            x = pgFillUtf8(g, Font, x, y, "→", -1, fg);
+            x = pgFillGlyph(g, Font, x, y, Font->subs[i].out, fg);
+            sprintf(buf, "  %04x", Font->subs[i].out);
+            x = pgFillUtf8(g, Font, x, y, buf, -1, fg);
+        }
+    }
     return ;
 
     float x = 0;

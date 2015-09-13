@@ -64,6 +64,7 @@ typedef struct {
 typedef struct {
     uint16_t ncontours, x1, y1, x2, y2, ends[];
 } Glyf;
+
 #pragma pack(pop)
 
 static int getGlyph(PgFont *font, int c) {
@@ -250,6 +251,7 @@ redoHeader:
     const void *hmtx = NULL;
     const void *glyf = NULL;
     const void *loca = NULL;
+    const void *gsub = NULL;
     
     struct { uint32_t tag, checksum, offset, size; } *thead = (void*)(sfnt + 1);
     for (int i = 0; i < nativeu16(sfnt->ntables); i++, thead++) {
@@ -264,6 +266,7 @@ redoHeader:
         case 'loca': loca = address; break;
         case 'OS/2': os2  = address; break;
         case 'name': name = address; break;
+        case 'GSUB': gsub = address; break;
         }
     }
     
@@ -274,9 +277,12 @@ redoHeader:
     otf->glyf = glyf;
     otf->loca = loca;
     otf->cmap = (void*)cmap;
+    otf->gsub = gsub;
+    otf->lang = 'eng ';
+    otf->script = 'latn';
     font->ctm = (PgMatrix){ 1, 0, 0, 1, 0, 0};
     font->nfonts = nfonts;
-    
+        
     font->em = nativeu16(head->em);
     otf->longLoca = native16(head->locaFormat);
     otf->nhmtx = nativeu16(hhea->nhmtx);
@@ -361,6 +367,187 @@ redoHeader:
 static void freeFont(PgFont *font) {
 }
 
+#pragma pack(push, 1)
+typedef struct {
+    uint32_t ver;
+    uint16_t scriptList;
+    uint16_t featureList;
+    uint16_t lookupList;
+} GsubTable;
+typedef struct {
+    uint32_t tag;
+    uint16_t offset;
+} Tag;
+typedef struct {
+    uint16_t nscripts;
+    Tag tag[];
+} ScriptList;
+typedef struct {
+    uint16_t defaultLanguage, nlangs;
+    Tag tag[];
+} ScriptTable;
+typedef struct {
+    uint16_t lookupOrder, required, nfeatures, features[];
+} LangSysTable;
+typedef struct {
+    uint16_t nfeatures;
+    Tag tag[];
+} FeatureList;
+typedef struct {
+    uint16_t params, nlookups, lookups[];
+} FeatureTable;
+typedef struct {
+    uint16_t nlookups, lookups[];
+} LookupList;
+typedef struct {
+    uint16_t type, flag, nsubtables, subtables[];
+} LookupTable;
+typedef union {
+    struct { uint16_t format, coverage; };
+    struct {
+        uint16_t format, coverage, delta;
+    } f1;
+    struct {
+        uint16_t format, coverage, nglyphs, glyphs[1];
+    } f2;
+    struct {
+        uint16_t format, lookupType;
+        uint32_t offset;
+    } f7;
+} GsubFormat;
+typedef union {
+    uint16_t format;
+    struct {
+        uint16_t format, nglyphs, glyphs[1];
+    } f1;
+    struct {
+        uint16_t format, nranges;
+        struct {
+            uint16_t start, end, coverageIndex;
+        } ranges[1];
+    } f2;
+} Coverage;
+
+#pragma pack(pop)
+
+static const void *offset(const void *base, unsigned offset) {
+    return (const uint8_t*)base + offset;
+}
+
+#include <stdio.h>
+static void gsubSubtable(PgFont *font, int type, const GsubFormat *subtable) {
+    const Coverage *coverage = offset(subtable, nativeu16(subtable->coverage));
+    
+    if (type == 1) { // Single Substitution
+        if (nativeu16(subtable->format) == 1) {
+            if (nativeu16(coverage->format) == 1)
+                for (int i = 0; i < nativeu16(coverage->f1.nglyphs); i++) {
+                    uint16_t g = nativeu16(coverage->f1.glyphs[i]);
+                    pgSubstituteGlyph(font, g, g + nativeu16(subtable->f1.delta));
+                }
+            else if (nativeu16(coverage->format) == 2)
+                for (int i = 0; i < nativeu16(coverage->f2.nranges); i++) {
+                    int start = nativeu16(coverage->f2.ranges[i].start);
+                    int end = nativeu16(coverage->f2.ranges[i].end);
+                    for (int g = start; g <= end; g++)
+                        pgSubstituteGlyph(font, g, g + nativeu16(subtable->f1.delta));
+                }
+        } else if (nativeu16(subtable->format) == 2) {
+            int o = 0;
+            if (nativeu16(coverage->format) == 1)
+                for (int i = 0; i < nativeu16(coverage->f1.nglyphs); i++) {
+                    uint16_t input = nativeu16(coverage->f1.glyphs[i]);
+                    uint16_t output = nativeu16(subtable->f2.glyphs[o++]);
+                    pgSubstituteGlyph(font, input, output);
+                }
+            else if (nativeu16(coverage->format) == 2)
+                for (int i = 0; i < nativeu16(coverage->f2.nranges); i++) {
+                    int start = nativeu16(coverage->f2.ranges[i].start);
+                    int end = nativeu16(coverage->f2.ranges[i].end);
+                    for (int input = start; input <= end; input++) {
+                        uint16_t output = nativeu16(subtable->f2.glyphs[o++]);
+                        pgSubstituteGlyph(font, input, output);
+                    }
+                }
+        }
+    } else if (type == 7) // Extension
+        gsubSubtable(font,
+            nativeu16(subtable->f7.lookupType),
+            offset(subtable, nativeu32(subtable->f7.offset)));
+}
+static uint32_t *lookupFeatures(PgFont *font, const uint32_t *tags) {
+    const GsubTable *gsub = ((PgOpenTypeFont*) font)->gsub;
+    if (!gsub)
+        return calloc(1, sizeof (uint32_t));
+    const ScriptList *scriptList = offset(gsub, nativeu16(gsub->scriptList));
+    
+    bool outputTags = tags != NULL;
+    if (!tags)
+        tags = (uint32_t[1]) { 0 };
+    
+    // Script List -> Script Table
+    const ScriptTable *scriptTable = NULL;
+    for (int i = 0; i < nativeu16(scriptList->nscripts); i++)
+        if (nativeu32(scriptList->tag[i].tag) == 'DFLT' ||
+            nativeu32(scriptList->tag[i].tag) == ((PgOpenTypeFont*) font)->script)
+        {
+            scriptTable = offset(scriptList, nativeu16(scriptList->tag[i].offset));
+        }
+    
+    // Script Table -> Language System Table
+    const LangSysTable *langSysTable = NULL;
+    if (scriptTable) {
+        if (nativeu32(scriptTable->defaultLanguage))
+            langSysTable = offset(scriptTable, nativeu16(scriptTable->defaultLanguage));
+        for (int i = 0; i < nativeu16(scriptTable->nlangs); i++)
+            if (nativeu32(scriptTable->tag[i].tag) == ((PgOpenTypeFont*) font)->lang)
+                langSysTable = offset(scriptTable, nativeu16(scriptTable->tag[i].offset));
+    }
+    
+    uint32_t *returnFeatures = NULL;
+    
+    // Language System Table -> Feature Table
+    if (langSysTable) {
+        const FeatureList *featureList = offset(gsub, nativeu16(gsub->featureList));
+        
+        returnFeatures = calloc(1 + nativeu16(langSysTable->nfeatures), sizeof *returnFeatures);
+        
+        for (int i = 0; i < nativeu16(langSysTable->nfeatures); i++) {
+            const FeatureTable *featureTable = NULL;
+            int index = nativeu16(langSysTable->features[i]);
+            for (int j = 0; tags[j]; j++)
+                if (nativeu32(featureList->tag[index].tag) == tags[j])
+                    featureTable = offset(featureList, nativeu16(featureList->tag[index].offset));
+            
+            if (returnFeatures)
+                returnFeatures[i] = nativeu32(featureList->tag[index].tag);
+            
+            // Tag was not selected by user
+            if (!featureTable)
+                continue;
+            
+            const LookupList *lookupList = offset(gsub, nativeu16(gsub->lookupList));
+            for (int i = 0; i < nativeu16(featureTable->nlookups); i++) {
+                int index = nativeu16(featureTable->lookups[i]);
+                const LookupTable *lookupTable = offset(lookupList, nativeu16(lookupList->lookups[index]));
+                
+                for (int i = 0; i < nativeu16(lookupTable->nsubtables); i++)
+                    gsubSubtable(font,
+                        nativeu16(lookupTable->type),
+                        offset(lookupTable, nativeu16(lookupTable->subtables[i])));
+            }
+        }
+    }
+    return returnFeatures;
+}
+static uint32_t *getFeatures(PgFont *font) {
+    return lookupFeatures(font, NULL);
+}
+static void setFeatures(PgFont *font, const uint32_t *tags) {
+    if (tags)
+        lookupFeatures(font, tags);
+}
+
 PgOpenTypeFont *pgLoadOpenTypeFont(const void *file, int fontIndex) {
     PgOpenTypeFont *otf = (PgOpenTypeFont*)pgLoadOpenTypeFontHeader(file, fontIndex);
     if (!otf) return NULL;
@@ -418,5 +605,7 @@ PgOpenTypeFont *pgLoadOpenTypeFont(const void *file, int fontIndex) {
     font->getGlyph = getGlyph;
     font->getGlyphPath = getGlyphPath;
     font->getGlyphWidth = getGlyphWidth;
+    font->setFeatures = setFeatures;
+    font->getFeatures = getFeatures;
     return otf;
 }

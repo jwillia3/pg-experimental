@@ -12,6 +12,34 @@
 #include "platform.h"
 #include "util.h"
 
+#define trailing(n) ((in[n] & 0xC0) == 0x80)
+#define overlong(n) (out < n? out = 0xfffd: out)
+unsigned pgStepUtf8(const uint8_t **input) {
+    unsigned out;
+    const uint8_t *in = *input;
+    if (*in < 0x80)
+        out = *in++;
+    else if (~*in & 0x20 && in[1] && trailing(1))
+        out =   (in[0] & 0x1f) << 6 |
+                (in[1] & 0x3f),
+        overlong(0x80),
+        in += 2;
+    else if (~*in & 0x10 && in[1] && in[2] && trailing(1) && trailing(2))
+        out =   (in[0] & 0x0f) << 12 |
+                (in[1] & 0x3f) << 6 |
+                (in[2] & 0x3f),
+        overlong(0x800),
+        in += 3;
+    else { // Malformed or non-BMP character
+        while ((*++in & 0xc0) == 0x80);
+        out = 0xfffd;
+    }
+    *input = in;
+    return out;
+}
+#undef trailing
+#undef overlong
+
 typedef struct { float x, m, y2; } edge_t;
 typedef struct { PgPt a, b; float m; } seg_t;
 typedef struct { seg_t *data; int n, cap; } segs_t;
@@ -414,8 +442,10 @@ int pgGetGlyphNoSubstitute(PgFont *font, int c) {
 int pgGetGlyph(PgFont *font, int c) {
     int g = pgGetGlyphNoSubstitute(font, c);
     for (int i = 0; i < font->nsubs; i++)
-        if (font->subs[i].in == g)
+        if (font->subs[i].in == g) {
             g = font->subs[i].out;
+            i = -1; // keep substituting
+        }
     return g;
 }
 PgFontFamily *pgScanFonts() {
@@ -476,6 +506,12 @@ void pgFreeFont(PgFont *font) {
     if (font->free)
         font->free(font);
     free(font);
+}
+uint32_t *pgGetFontFeatures(PgFont *font) {
+    return font->getFeatures(font);
+}
+void pgSetFontFeatures(PgFont *font, const uint32_t *tags) {
+    font->setFeatures(font, tags);
 }
 void pgScaleFont(PgFont *font, float x, float y) {
     if (!x) x = y;
@@ -544,8 +580,8 @@ void pgSubstituteGlyph(PgFont *font, uint16_t in, uint16_t out) {
     font->subs[font->nsubs].out = out;
     font->nsubs++;
 }
-float pgFillChar(Pg *g, PgFont *font, float x, float y, int c, uint32_t color) {
-    PgPath *path = pgGetCharPath(font, NULL, c);
+float pgFillGlyph(Pg *g, PgFont *font, float x, float y, int glyph, uint32_t color) {
+    PgPath *path = pgGetGlyphPath(font, NULL, glyph);
     if (path) {
         for (int i = 0; i < path->npoints; i++)
             path->data[i].x += x,
@@ -553,12 +589,23 @@ float pgFillChar(Pg *g, PgFont *font, float x, float y, int c, uint32_t color) {
         pgFillPath(g, path, color);
         pgFreePath(path);
     }
-    return x + pgGetCharWidth(font, c);
+    return x + pgGetGlyphWidth(font, glyph);
+}
+float pgFillChar(Pg *g, PgFont *font, float x, float y, int c, uint32_t color) {
+    return pgFillGlyph(g, font, x, y, pgGetGlyph(font, c), color);
 }
 float pgFillString(Pg *g, PgFont *font, float x, float y, const wchar_t *text, int len, uint32_t color) {
     if (len < 0) len = wcslen(text);
     for (int i = 0; i < len; i++)
         x = pgFillChar(g, font, x, y, text[i], color);
+    return x;
+}
+float pgFillUtf8(Pg *g, PgFont *font, float x, float y, const char *text, int len, uint32_t color) {
+    if (len < 0) len = strlen(text);
+    const char *end = text + len;
+    const char *p = text;
+    while (p < end)
+        x = pgFillChar(g, font, x, y, pgStepUtf8(&p), color);
     return x;
 }
 void pgFillRect(Pg *g, PgPt a, PgPt b, uint32_t color) {

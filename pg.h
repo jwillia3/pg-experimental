@@ -48,16 +48,21 @@ struct PgFont {
     PgPath *(*getGlyphPath)(PgFont *font, PgPath *path, int glyph);
     int (*getGlyph)(PgFont *font, int glyph);
     float (*getGlyphWidth)(PgFont *font, int glyph);
+    uint32_t *(*getFeatures)(PgFont *font);
+    void (*setFeatures)(PgFont *font, const uint32_t *tags);
 };
 typedef struct {
     PgFont _;
     const int16_t *hmtx;
     const void *glyf;
     const void *loca;
+    const void *gsub;
     uint16_t *cmap;
     bool longLoca;
     int nhmtx;
     int nglyphs;
+    uint32_t lang;
+    uint32_t script;
 } PgOpenTypeFont;
 typedef struct {
     const wchar_t *name;
@@ -73,6 +78,7 @@ int             PgNFontFamilies;
 
 static PgPt pgPt(float x, float y) { return (PgPt){x,y}; }
 static PgRect pgRect(PgPt a, PgPt b) { return (PgRect){ .a = a, .b = b }; }
+unsigned pgStepUtf8(const uint8_t **input);
 
 // CANVAS MANAGEMENT
     Pg *pgNewBitmapCanvas(int width, int height);
@@ -132,6 +138,8 @@ static PgRect pgRect(PgPt a, PgPt b) { return (PgRect){ .a = a, .b = b }; }
     
     
     PgFont *pgLoadFontFromFile(const wchar_t *filename, int index);
+    uint32_t *pgGetFontFeatures(PgFont *font);
+    void pgSetFontFeatures(PgFont *font, const uint32_t *tags);
     int pgGetGlyph(PgFont *font, int c);
     int pgGetGlyphNoSubstitute(PgFont *font, int c);
     void pgSubstituteGlyph(PgFont *font, uint16_t in, uint16_t out);
@@ -139,8 +147,10 @@ static PgRect pgRect(PgPt a, PgPt b) { return (PgRect){ .a = a, .b = b }; }
     void pgScaleFont(PgFont *font, float x, float y);
     PgPath *pgGetGlyphPath(PgFont *font, PgPath *path, int glyph);
     PgPath *pgGetCharPath(PgFont *font, PgPath *path, int c);
+    float pgFillGlyph(Pg *g, PgFont *font, float x, float y, int glyph, uint32_t color);
     float pgFillChar(Pg *g, PgFont *font, float x, float y, int c, uint32_t color);
     float pgFillString(Pg *g, PgFont *font, float x, float y, const wchar_t *text, int len, uint32_t color);
+    float pgFillUtf8(Pg *g, PgFont *font, float x, float y, const char *text, int len, uint32_t color);
     float pgGetCharWidth(PgFont *font, int c);
     float pgGetGlyphWidth(PgFont *font, int c);
     float pgGetStringWidth(PgFont *font, const wchar_t *text, int len);
