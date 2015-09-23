@@ -125,6 +125,8 @@ uint32_t pgBlend(uint32_t fg, uint32_t bg, uint32_t a);
     PgOpenTypeFont *pgLoadOpenTypeFont(const void *file, int fontIndex);
     
     float pgGetFontEm(PgFont *font);
+    float pgGetFontHeight(PgFont *font);
+    float pgGetFontBaseline(PgFont *font);
     float pgGetFontXHeight(PgFont *font);
     float pgGetFontCapHeight(PgFont *font);
     float pgGetFontAscender(PgFont *font);
@@ -158,3 +160,5 @@ uint32_t pgBlend(uint32_t fg, uint32_t bg, uint32_t a);
     void pgFillRect(Pg *g, PgPt a, PgPt b, uint32_t color);
     void pgStrokeRect(Pg *g, PgPt a, PgPt b, float width, uint32_t color);
     void pgStrokeLine(Pg *g, PgPt a, PgPt b, float width, uint32_t color);
+    void pgStrokeHLine(Pg *g, PgPt a, float x2, float width, uint32_t color);
+    void pgStrokeVLine(Pg *g, PgPt a, float y2, float width, uint32_t color);

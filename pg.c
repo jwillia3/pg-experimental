@@ -56,7 +56,7 @@ static void addSeg(segs_t *segs, PgPt a, PgPt b) {
             0 };
 }
 #define Subsample 3.0f
-#define Flatness 1.001f
+#define Flatness 1.000f
 static void segmentQuad(segs_t *segs, PgPt a, PgPt b, PgPt c, int n) {
     if (!n) {
         addSeg(segs, a, c);
@@ -266,6 +266,7 @@ static void bmp_strokePath(Pg *g, PgPath *path, float width, uint32_t color) {
         pgLine(sub, vert[1]);
         pgLine(sub, vert[2]);
         pgLine(sub, vert[3]);
+        pgMultiply(g, &otm);
         pgFillPath(g, sub, color);
         pgFreePath(sub);
     }
@@ -636,4 +637,10 @@ void pgStrokeLine(Pg *g, PgPt a, PgPt b, float width, uint32_t color) {
     pgLine(path, b);
     pgStrokePath(g, path, width, color);
     pgFreePath(path);
+}
+void pgStrokeHLine(Pg *g, PgPt a, float x2, float width, uint32_t color) {
+    pgStrokeLine(g, a, pgPt(x2, a.y), width, color);
+}
+void pgStrokeVLine(Pg *g, PgPt a, float y2, float width, uint32_t color) {
+    pgStrokeLine(g, a, pgPt(a.x, y2), width, color);
 }
