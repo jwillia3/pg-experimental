@@ -516,7 +516,7 @@ static uint32_t *lookupFeatures(PgFont *font, const uint32_t *tags) {
             const FeatureTable *featureTable = NULL;
             int index = nativeu16(langSysTable->features[i]);
             for (int j = 0; tags[j]; j++)
-                if (nativeu32(featureList->tag[index].tag) == tags[j])
+                if (featureList->tag[index].tag == tags[j])
                     featureTable = offset(featureList, nativeu16(featureList->tag[index].offset));
             
             if (returnFeatures)

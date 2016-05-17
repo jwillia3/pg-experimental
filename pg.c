@@ -56,7 +56,7 @@ static void addSeg(segs_t *segs, PgPt a, PgPt b) {
             0 };
 }
 #define Subsample 3.0f
-#define Flatness 1.000f
+#define Flatness 1.001f
 static void segmentQuad(segs_t *segs, PgPt a, PgPt b, PgPt c, int n) {
     if (!n) {
         addSeg(segs, a, c);
@@ -103,23 +103,30 @@ static int sortSegsDescending(const void *x, const void *y) {
         a->a.x > b->a.x? 1: 0;
 }
 
-static uint32_t blend(uint32_t fg, uint32_t bg, uint32_t a) {
-    if (a == 0xff)
-        return fg;
-    else if (a == 0)
-        return bg;
-    unsigned na = 255 - a;
-    unsigned rb = ((( fg & 0x00ff00ff) * a) +
-                    ((bg & 0x00ff00ff) * na)) &
-                    0xff00ff00;
-    unsigned g = (((  fg & 0x0000ff00) * a) +
-                    ((bg & 0x0000ff00) * na)) &
-                    0x00ff0000;
-    return (rb | g) >> 8;
+static void initGammaTable(float *gammaTable, float gamma) {
+    for (float i = 0; i < 256.0f; i++)
+        gammaTable[(int)i] = powf(i, gamma);
 }
-uint32_t pgBlend(uint32_t fg, uint32_t bg, uint32_t a) {
-    return blend(fg, bg, a);
+static uint32_t blend(uint32_t fg, uint32_t bg, uint32_t a255, float *gammaTable, float gamma) {
+    if (a255 == 255) return fg;
+    if (a255 == 0) return bg;
+    float a = a255 / 255.0f;
+    float na = 1.0f - a;
+    uint8_t r = powf(a * gammaTable[fg >> 16 & 255] + na * gammaTable[bg >> 16 & 255], 1.0f / gamma);
+    uint8_t g = powf(a * gammaTable[fg >>  8 & 255] + na * gammaTable[bg >>  8 & 255], 1.0f / gamma);
+    uint8_t b = powf(a * gammaTable[fg >>  0 & 255] + na * gammaTable[bg >>  0 & 255], 1.0f / gamma);
+    return (r << 16) + (g << 8) + b;
 }
+uint32_t pgBlendWithGamma(uint32_t fg, uint32_t bg, uint32_t a255, float *gammaTable, float gamma) {
+    return blend(fg, bg, a255, gammaTable, gamma);
+}
+uint32_t pgBlend(uint32_t fg, uint32_t bg, uint32_t a255) {
+    static float gammaTable[256];
+    if (!gammaTable[255])
+        initGammaTable(gammaTable, 2.2f);
+    return blend(fg, bg, a255, gammaTable, 2.2f);
+}
+
 
 static void bmp_clear(Pg *g, uint32_t color) {
     if (g->stride == g->width)
@@ -238,7 +245,7 @@ static void bmp_fillPath(Pg *g, PgPath *path, uint32_t color) {
         uint32_t *__restrict bmp = g->bmp + scanY * g->stride;
         maxx = min(maxx, g->clip.x2 - 1);
         for (int i = minx; i <= maxx; i++)
-            bmp[i] = blend(color, bmp[i], buf[i]);
+            bmp[i] = blend(color, bmp[i], buf[i], g->gammaTable, g->gamma);
     }
     free(buf);
     free(edges);
@@ -286,6 +293,12 @@ static Pg *bmp_subsection(Pg *original, PgRect rect) {
     g->bmp += (int)rect.a.x + (int)rect.a.y * original->stride;
     return g;
 }
+static void bmp_setGamma(Pg *pg, float gamma) {
+    if (pg->gamma == gamma)
+        return;
+    pg->gamma = gamma;
+    initGammaTable(pg->gammaTable, gamma);
+}
 Pg *pgNewBitmapCanvas(int width, int height) {
     Pg *g = calloc(1, sizeof *g);
     g->resize = bmp_resize;
@@ -294,12 +307,17 @@ Pg *pgNewBitmapCanvas(int width, int height) {
     g->fillPath = bmp_fillPath;
     g->strokePath = bmp_strokePath;
     g->subsection = bmp_subsection;
+    g->setGamma = bmp_setGamma;
     pgIdentityMatrix(&g->ctm);
+    g->setGamma(g, 2.2f);
     g->resize(g, width, height);
     return g;
 }
 Pg *pgSubsectionCanvas(Pg *g, PgRect rect) {
     return g->subsection(g, rect);
+}
+void pgSetGamma(Pg *g, float gamma) {
+    g->setGamma(g, gamma);
 }
 void pgClearCanvas(Pg *g, uint32_t color) {
     g->clear(g, color);

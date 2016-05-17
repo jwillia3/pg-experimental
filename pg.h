@@ -23,10 +23,13 @@ struct Pg {
     void (*free)(Pg *pg);
     void (*fillPath)(Pg *g, PgPath *path, uint32_t color);
     void (*strokePath)(Pg *g, PgPath *path, float width, uint32_t color);
+    void (*setGamma)(Pg *g, float gamma);
     Pg *(*subsection)(Pg *pg, PgRect rect);
     uint32_t *bmp;
     int stride;
     bool borrowed;
+    float gamma;
+    float gammaTable[256];
 };
 typedef struct PgFont PgFont;
 struct PgFont {
@@ -79,6 +82,7 @@ int             PgNFontFamilies;
 static PgPt pgPt(float x, float y) { return (PgPt){x,y}; }
 static PgRect pgRect(PgPt a, PgPt b) { return (PgRect){ .a = a, .b = b }; }
 unsigned pgStepUtf8(const uint8_t **input);
+uint32_t pgBlendWithGamma(uint32_t fg, uint32_t bg, uint32_t a255, float *gammaTable, float gamma);
 uint32_t pgBlend(uint32_t fg, uint32_t bg, uint32_t a);
 
 // CANVAS MANAGEMENT
@@ -87,6 +91,10 @@ uint32_t pgBlend(uint32_t fg, uint32_t bg, uint32_t a);
     void pgClearCanvas(Pg *g, uint32_t color);
     void pgFreeCanvas(Pg *g);
     void pgResizeCanvas(Pg *g, int width, int height);
+    
+    // COLOUR MANAGEMENT
+    void pgSetGamma(Pg *g, float gamma);
+    
     // CANVAS MATRIX MANAGEMENT
     void pgIdentity(Pg *g);
     void pgTranslate(Pg *g, float x, float y);
