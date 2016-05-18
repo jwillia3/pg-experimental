@@ -18,6 +18,8 @@ struct Pg {
     int height;
     PgMatrix ctm;
     PgRect clip;
+    float subsamples;
+    float flatness;
     void (*resize)(Pg *pg, int width, int height);
     void (*clear)(Pg *pg, uint32_t color);
     void (*free)(Pg *pg);

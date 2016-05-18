@@ -55,9 +55,7 @@ static void addSeg(segs_t *segs, PgPt a, PgPt b) {
             a.y > b.y? (a.x - b.x) / (a.y - b.y):
             0 };
 }
-#define Subsample 3.0f
-#define Flatness 1.001f
-static void segmentQuad(segs_t *segs, PgPt a, PgPt b, PgPt c, int n) {
+static void segmentQuad(segs_t *segs, PgPt a, PgPt b, PgPt c, int n, float flatness) {
     if (!n) {
         addSeg(segs, a, c);
         return;
@@ -65,15 +63,15 @@ static void segmentQuad(segs_t *segs, PgPt a, PgPt b, PgPt c, int n) {
     float ab = distance(pgPt(a.x - b.x, a.y - b.y));
     float bc = distance(pgPt(b.x - c.x, b.y - c.y));
     float ac = distance(pgPt(a.x - c.x, a.y - c.y));
-    if (ab + bc >= Flatness * ac) {
+    if (ab + bc >= flatness * ac) {
         PgPt ab = midpoint(a, b);
         PgPt bc = midpoint(b, c);
         PgPt abc = midpoint(ab, bc);
-        segmentQuad(segs, a, ab, abc, n - 1);
-        segmentQuad(segs, abc, bc, c, n - 1);
+        segmentQuad(segs, a, ab, abc, n - 1, flatness);
+        segmentQuad(segs, abc, bc, c, n - 1, flatness);
     } else addSeg(segs, a, c);
 }
-static void segmentCubic(segs_t *segs, PgPt a, PgPt b, PgPt c, PgPt d, int n) {
+static void segmentCubic(segs_t *segs, PgPt a, PgPt b, PgPt c, PgPt d, int n, float flatness) {
     if (!n) {
         addSeg(segs, a, d);
         return;
@@ -82,15 +80,15 @@ static void segmentCubic(segs_t *segs, PgPt a, PgPt b, PgPt c, PgPt d, int n) {
     float bc = distance(pgPt(b.x - c.x, b.y - c.y));
     float cd = distance(pgPt(c.x - d.x, c.y - d.y));
     float ad = distance(pgPt(a.x - d.x, a.y - d.y));
-    if (ab + bc + cd >= Flatness * ad) {
+    if (ab + bc + cd >= flatness * ad) {
         PgPt ab = midpoint(a, b);
         PgPt bc = midpoint(b, c);
         PgPt cd = midpoint(c, d);
         PgPt abc = midpoint(ab, bc);
         PgPt bcd = midpoint(bc, cd);
         PgPt abcd = midpoint(abc, bcd);
-        segmentCubic(segs, a, ab, abc, abcd, n - 1);
-        segmentCubic(segs, abcd, bcd, cd, d, n - 1);
+        segmentCubic(segs, a, ab, abc, abcd, n - 1, flatness);
+        segmentCubic(segs, abcd, bcd, cd, d, n - 1, flatness);
     } else addSeg(segs, a, d);
 }
 static int sortSegsDescending(const void *x, const void *y) {
@@ -152,7 +150,7 @@ static void bmp_resize(Pg *g, int width, int height) {
     g->clip = (PgRect){ 0, 0, width, height };
     g->bmp = malloc(width * height * 4);
 }
-static segs_t bmp_segmentPath(PgPath *path, PgMatrix ctm, bool close) {
+static segs_t bmp_segmentPath(PgPath *path, PgMatrix ctm, bool close, float flatness) {
     segs_t segs = { .data = NULL, .n = 0 };
     PgPt *p = path->data;
     int *t = (int*)path->types;
@@ -164,9 +162,9 @@ static segs_t bmp_segmentPath(PgPath *path, PgMatrix ctm, bool close) {
             if (*t == PG_LINE)
                 addSeg(&segs, a, next);
             else if (*t == PG_QUAD)
-                segmentQuad(&segs, a, pgTransformPoint(ctm, p[0]), next, BEZIER_LIMIT);
+                segmentQuad(&segs, a, pgTransformPoint(ctm, p[0]), next, BEZIER_LIMIT, flatness);
             else if (*t == PG_CUBIC)
-                segmentCubic(&segs, a, pgTransformPoint(ctm, p[0]), pgTransformPoint(ctm, p[1]), next, BEZIER_LIMIT);
+                segmentCubic(&segs, a, pgTransformPoint(ctm, p[0]), pgTransformPoint(ctm, p[1]), next, BEZIER_LIMIT, flatness);
         }
         if (close)
             addSeg(&segs, a, first);
@@ -176,13 +174,13 @@ static segs_t bmp_segmentPath(PgPath *path, PgMatrix ctm, bool close) {
 static void bmp_fillPath(Pg *g, PgPath *path, uint32_t color) {
     if (!path->npoints) return;
     PgMatrix ctm = g->ctm;
-    pgScaleMatrix(&ctm, 1, Subsample);
-    segs_t segs = bmp_segmentPath(path, ctm, true);
+    pgScaleMatrix(&ctm, 1, g->subsamples);
+    segs_t segs = bmp_segmentPath(path, ctm, true, g->flatness);
     qsort(segs.data, segs.n, sizeof(seg_t), sortSegsDescending);
     float maxY = segs.data[0].b.y;
     for (seg_t *seg = segs.data + 1; seg < segs.data + segs.n; seg++)
         maxY = max(maxY, seg->b.y);
-    maxY = clamp(g->clip.y1, maxY / Subsample + 1, g->clip.y2);
+    maxY = clamp(g->clip.y1, maxY / g->subsamples + 1, g->clip.y2);
     
     // Scan through lines filling between edge
     typedef struct { float x, m, y2; } edge_t;
@@ -193,13 +191,13 @@ static void bmp_fillPath(Pg *g, PgPath *path, uint32_t color) {
     uint8_t *buf = malloc(g->stride);
     int minx = g->clip.x1;
     int maxx = g->clip.x2 - 1;
-    for (int scanY = max(g->clip.y1, segs.data[0].a.y / Subsample); scanY < maxY; scanY++) {
+    for (int scanY = max(g->clip.y1, segs.data[0].a.y / g->subsamples); scanY < maxY; scanY++) {
         if (minx <= maxx)
             memset(buf + minx, 0, maxx - minx + 1);
         minx = g->clip.x2 - 1;
         maxx = g->clip.x1;
-        for (float ss = -Subsample / 2.0f; ss < Subsample / 2.0f; ss++) {
-            float y = Subsample * scanY + ss + 0.5f;
+        for (float ss = -g->subsamples * 0.5f; ss < g->subsamples * 0.5f; ss++) {
+            float y = g->subsamples * scanY + ss + 0.5f;
             edge_t *endEdge = edges + nedges;
             nedges = 0;
             for (edge_t *e = edges; e < endEdge; e++)
@@ -221,7 +219,7 @@ static void bmp_fillPath(Pg *g, PgPath *path, uint32_t color) {
                     edges[j - 1] = tmp;
                 }
                     
-            float level = 255.0f / Subsample;
+            float level = 255.0f / g->subsamples;
             for (edge_t *e = edges + 1; e < edges + nedges; e += 2) {
                 float x1 = e[-1].x;
                 float x2 = e[0].x;
@@ -253,7 +251,7 @@ static void bmp_fillPath(Pg *g, PgPath *path, uint32_t color) {
 }
 static void bmp_strokePath(Pg *g, PgPath *path, float width, uint32_t color) {
     PgMatrix otm = g->ctm;
-    segs_t segs = bmp_segmentPath(path, g->ctm, false);
+    segs_t segs = bmp_segmentPath(path, g->ctm, false, g->flatness);
     for (seg_t *seg = segs.data; seg < segs.data + segs.n; seg++) {
         PgPath *sub = pgNewPath();
         float dx = seg->b.x - seg->a.x;
@@ -301,6 +299,8 @@ static void bmp_setGamma(Pg *pg, float gamma) {
 }
 Pg *pgNewBitmapCanvas(int width, int height) {
     Pg *g = calloc(1, sizeof *g);
+    g->subsamples = 3.0f;
+    g->flatness = 1.01f;
     g->resize = bmp_resize;
     g->clear = bmp_clear;
     g->free = bmp_free;
