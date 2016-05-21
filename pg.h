@@ -126,6 +126,7 @@ uint32_t pgBlend(uint32_t fg, uint32_t bg, uint32_t a);
     void pgClosePath(PgPath *path);
     void pgFillPath(Pg *g, PgPath *path, uint32_t color);
     void pgStrokePath(Pg *g, PgPath *path, float width, uint32_t color);
+    PgRect pgGetPathBindingBox(PgPath *path, PgMatrix ctm);
 // Fonts
     PgFontFamily *pgScanFonts();
     PgFont *pgLoadFontHeader(const void *file, int fontIndex);

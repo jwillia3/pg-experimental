@@ -173,7 +173,16 @@ static segs_t bmp_segmentPath(PgPath *path, PgMatrix ctm, bool close, float flat
 }
 static void bmp_fillPath(Pg *g, PgPath *path, uint32_t color) {
     if (!path->npoints) return;
+    
     PgMatrix ctm = g->ctm;
+    PgRect binding_box = pgGetPathBindingBox(path, ctm);
+    
+    if (binding_box.a.x >= g->clip.x2 ||
+        binding_box.a.y >= g->clip.y2 ||
+        binding_box.b.x <  g->clip.x1 ||
+        binding_box.b.y <  g->clip.y1)
+        return;
+    
     pgScaleMatrix(&ctm, 1, g->subsamples);
     segs_t segs = bmp_segmentPath(path, ctm, true, g->flatness);
     qsort(segs.data, segs.n, sizeof(seg_t), sortSegsDescending);
@@ -457,6 +466,18 @@ void pgFillPath(Pg *g, PgPath *path, uint32_t color) {
 }
 void pgStrokePath(Pg *g, PgPath *path, float width, uint32_t color) {
     g->strokePath(g, path, width, color);
+}
+PgRect pgGetPathBindingBox(PgPath *path, PgMatrix ctm) {
+    if (path->npoints == 0) return (PgRect){0.0f, 0.0f, 0.0f, 0.0f};
+    PgRect r = {INFINITY, INFINITY, 0.0f, 0.0f};
+    for (PgPt *i = path->data; i < path->data + path->npoints; i++) {
+        PgPt p = pgTransformPoint(ctm, *i);
+        if      (p.x < r.a.x) r.a.x = p.x;
+        else if (p.x > r.b.x) r.b.x = p.x;
+        else if (p.y < r.a.y) r.a.y = p.y;
+        else if (p.y > r.b.y) r.b.y = p.y;
+    }
+    return r;
 }
 int pgGetGlyphNoSubstitute(PgFont *font, int c) {
     return font->getGlyph(font, c);
