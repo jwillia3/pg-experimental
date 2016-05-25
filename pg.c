@@ -469,13 +469,13 @@ void pgStrokePath(Pg *g, PgPath *path, float width, uint32_t color) {
 }
 PgRect pgGetPathBindingBox(PgPath *path, PgMatrix ctm) {
     if (path->npoints == 0) return (PgRect){0.0f, 0.0f, 0.0f, 0.0f};
-    PgRect r = {INFINITY, INFINITY, 0.0f, 0.0f};
+    PgRect r = {INFINITY, INFINITY, -INFINITY, -INFINITY};
     for (PgPt *i = path->data; i < path->data + path->npoints; i++) {
         PgPt p = pgTransformPoint(ctm, *i);
-        if      (p.x < r.a.x) r.a.x = p.x;
-        else if (p.x > r.b.x) r.b.x = p.x;
-        else if (p.y < r.a.y) r.a.y = p.y;
-        else if (p.y > r.b.y) r.b.y = p.y;
+        if (p.x < r.a.x) r.a.x = p.x;
+        if (p.x > r.b.x) r.b.x = p.x;
+        if (p.y < r.a.y) r.a.y = p.y;
+        if (p.y > r.b.y) r.b.y = p.y;
     }
     return r;
 }
