@@ -585,19 +585,19 @@ float pgGetFontEm(PgFont *font) {
     return font->ctm.a * font->em;
 }
 float pgGetFontXHeight(PgFont *font) {
-    return font->ctm.a * font->xHeight;
+    return font->ctm.d * font->xHeight;
 }
 float pgGetFontCapHeight(PgFont *font) {
-    return font->ctm.a * font->capHeight;
+    return font->ctm.d * font->capHeight;
 }
 float pgGetFontAscender(PgFont *font) {
-    return font->ctm.a * font->ascender;
+    return font->ctm.d * font->ascender;
 }
 float pgGetFontDescender(PgFont *font) {
-    return font->ctm.a * font->descender;
+    return font->ctm.d * font->descender;
 }
 float pgGetFontLineGap(PgFont *font) {
-    return font->ctm.a * font->lineGap;
+    return font->ctm.d * font->lineGap;
 }
 int pgGetFontWeight(PgFont *font) {
     return font->weight;
