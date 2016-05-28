@@ -584,6 +584,9 @@ float pgGetStringWidth(PgFont *font, const wchar_t *text, int len) {
 float pgGetFontEm(PgFont *font) {
     return font->ctm.a * font->em;
 }
+float pgGetFontHeight(PgFont *font) {
+    return pgGetFontAscender(font) - pgGetFontDescender(font);
+}
 float pgGetFontXHeight(PgFont *font) {
     return font->ctm.d * font->xHeight;
 }
