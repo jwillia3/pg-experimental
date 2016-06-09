@@ -51,7 +51,7 @@ struct PgFont {
     void (*free)(PgFont *font);
     void (*freeHost)(void *host);
     PgPath *(*getGlyphPath)(PgFont *font, PgPath *path, int glyph);
-    int (*getGlyph)(PgFont *font, int glyph);
+    int (*getGlyph)(PgFont *font, int c);
     float (*getGlyphWidth)(PgFont *font, int glyph);
     uint32_t *(*getFeatures)(PgFont *font);
     void (*setFeatures)(PgFont *font, const uint32_t *tags);
@@ -69,6 +69,11 @@ typedef struct {
     uint32_t lang;
     uint32_t script;
 } PgOpenTypeFont;
+typedef struct PgSimpleFont {
+    PgFont  _;
+    const uint8_t   **glyphData;
+    float           avgWidth;
+} PgSimpleFont;
 typedef struct {
     const wchar_t *name;
     const wchar_t *roman[10];
@@ -77,15 +82,29 @@ typedef struct {
     int italicIndex[10];
 } PgFontFamily;
 
+typedef struct PgStringBuffer {
+    unsigned    length;
+    char        *text;
+} PgStringBuffer;
+
 PgFontFamily    *PgFontFamilies;
 int             PgNFontFamilies;
 
 
 static PgPt pgPt(float x, float y) { return (PgPt){x,y}; }
+static PgPt pgAddPt(PgPt a, PgPt b) { return (PgPt){a.x + b.x, a.y + b.y}; }
+static PgPt pgSubtractPt(PgPt a, PgPt b) { return (PgPt){a.x - b.x, a.y - b.y}; }
 static PgRect pgRect(PgPt a, PgPt b) { return (PgRect){ .a = a, .b = b }; }
-unsigned pgStepUtf8(const uint8_t **input);
 uint32_t pgBlendWithGamma(uint32_t fg, uint32_t bg, uint32_t a255, float *gammaTable, float gamma);
 uint32_t pgBlend(uint32_t fg, uint32_t bg, uint32_t a);
+
+unsigned pgStepUtf8(const uint8_t **input);
+uint8_t *pgOutputUtf8(uint8_t **output, unsigned c);
+PgStringBuffer *pgNewStringBuffer();
+PgStringBuffer *pgBufferCharacter(PgStringBuffer *buffer, unsigned c);
+PgStringBuffer *pgBufferString(PgStringBuffer *buffer, const uint8_t *text, int length);
+void pgFreeStringBuffer(PgStringBuffer *buffer);
+
 
 // CANVAS MANAGEMENT
     Pg *pgNewBitmapCanvas(int width, int height);
@@ -127,6 +146,7 @@ uint32_t pgBlend(uint32_t fg, uint32_t bg, uint32_t a);
     void pgFillPath(Pg *g, PgPath *path, uint32_t color);
     void pgStrokePath(Pg *g, PgPath *path, float width, uint32_t color);
     PgRect pgGetPathBindingBox(PgPath *path, PgMatrix ctm);
+    PgStringBuffer *pgPathAsSvgPath(PgStringBuffer *buffer, PgPath *path);
 // Fonts
     PgFontFamily *pgScanFonts();
     PgFont *pgLoadFontHeader(const void *file, int fontIndex);
@@ -134,6 +154,8 @@ uint32_t pgBlend(uint32_t fg, uint32_t bg, uint32_t a);
     PgFont *pgOpenFont(const wchar_t *family, int weight, bool italic);
     PgOpenTypeFont *pgLoadOpenTypeFontHeader(const void *file, int fontIndex);
     PgOpenTypeFont *pgLoadOpenTypeFont(const void *file, int fontIndex);
+    struct PgSimpleFont *pgLoadSimpleFontHeader(const void *file, int fontIndex);
+    struct PgSimpleFont *pgLoadSimpleFont(const void *file, int fontIndex);
     
     float pgGetFontEm(PgFont *font);
     float pgGetFontHeight(PgFont *font);
@@ -173,3 +195,4 @@ uint32_t pgBlend(uint32_t fg, uint32_t bg, uint32_t a);
     void pgStrokeLine(Pg *g, PgPt a, PgPt b, float width, uint32_t color);
     void pgStrokeHLine(Pg *g, PgPt a, float x2, float width, uint32_t color);
     void pgStrokeVLine(Pg *g, PgPt a, float y2, float width, uint32_t color);
+    PgPath *pgInterpretSvgPath(PgPath *path, const char *svg);

@@ -32,3 +32,6 @@ void pwSize(Pw *pw, int width, int height) {
 void pwClose(Pw *pw) {
     pwExec(pw, PWE_CLOSE, (PwEventArgs) { 0 });
 }
+void pwRefresh(Pw *pw) {
+    pwExec(pw, PWE_DRAW, (PwEventArgs){0});
+}

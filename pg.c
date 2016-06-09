@@ -1,6 +1,7 @@
 #define BEZIER_LIMIT 10
 #include <assert.h>
 #include <float.h>
+#include <iso646.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -37,8 +38,52 @@ unsigned pgStepUtf8(const uint8_t **input) {
     *input = in;
     return out;
 }
+uint8_t *pgOutputUtf8(uint8_t **output, unsigned c) {
+    if (c < 0x80)
+        *(*output)++ = c;
+    else if (c < 0x800)
+        *(*output)++ = 0xc0 | 0x1f & c >> 6,
+        *(*output)++ = 0x80 | 0x3f & c;
+    else if (c <= 0xffff)
+        *(*output)++ = 0xe0 | 0x0f & c >> 12,
+        *(*output)++ = 0x80 | 0x3f & c >> 6,
+        *(*output)++ = 0x80 | 0x3f & c;
+    else return pgOutputUtf8(output, 0xfffd); // substitute character
+    return *output;
+}
 #undef trailing
 #undef overlong
+
+PgStringBuffer *pgNewStringBuffer() {
+    return calloc(1, sizeof(PgStringBuffer));
+}
+PgStringBuffer *pgBufferCharacter(PgStringBuffer *buffer, unsigned c) {
+    buffer->text = realloc(buffer->text, buffer->length + 6 + 1);
+    char *p = &buffer->text[buffer->length];
+    buffer->length = pgOutputUtf8(&p, c) - buffer->text;
+    *p = 0;
+    return buffer;
+}
+PgStringBuffer *pgBufferString(PgStringBuffer *buffer, const uint8_t *text, int length) {
+    if (length < 0) length = strlen(text);
+    for (int i = 0; i < length; i++) pgBufferCharacter(buffer, text[i]);
+    return buffer;
+}
+PgStringBuffer *pgBufferFormat(PgStringBuffer *buffer, const uint8_t *format, ...) {
+    va_list ap;
+    char *temp = malloc(65536 + 1);
+    va_start(ap, format);
+    vsprintf(temp, format, ap);
+    va_end(ap);
+    pgBufferString(buffer, temp, -1);
+    free(temp);
+    
+    return buffer;
+}
+void pgFreeStringBuffer(PgStringBuffer *buffer) {
+    free(buffer->text);
+    free(buffer);
+}
 
 typedef struct { float x, m, y2; } edge_t;
 typedef struct { PgPt a, b; float m; } seg_t;
@@ -309,7 +354,7 @@ static void bmp_setGamma(Pg *pg, float gamma) {
 Pg *pgNewBitmapCanvas(int width, int height) {
     Pg *g = calloc(1, sizeof *g);
     g->subsamples = 3.0f;
-    g->flatness = 1.01f;
+    g->flatness = 1.001f;
     g->resize = bmp_resize;
     g->clear = bmp_clear;
     g->free = bmp_free;
@@ -479,6 +524,26 @@ PgRect pgGetPathBindingBox(PgPath *path, PgMatrix ctm) {
     }
     return r;
 }
+PgStringBuffer *pgPathAsSvgPath(PgStringBuffer *buffer, PgPath *path) {
+    if (not buffer)
+        buffer = pgNewStringBuffer();
+    PgPt *p = path->data;
+    int *t = (int*)path->types;
+    for (int *sub = path->subs; sub < path->subs + path->nsubs; sub++) {
+        pgBufferFormat(buffer, "M%g,%g", p[0].x, p[0].y);
+        p++;
+        for (PgPt *end = p + *sub - 1, next; p < end; p += *t++)
+            if (*t == PG_LINE)
+                pgBufferFormat(buffer, "L%g,%g", p[0].x, p[0].y);
+            else if (*t == PG_QUAD)
+                pgBufferFormat(buffer, "L%g,%g, %g,%g", p[0].x, p[0].y, p[1].x, p[1].y);
+            else if (*t == PG_CUBIC)
+                pgBufferFormat(buffer, "L%g,%g, %g,%g %g,%g", p[0].x, p[0].y, p[1].x, p[1].y, p[2].x, p[2].y);
+        if (sub + 1 < path->subs + path->nsubs)
+            pgBufferCharacter(buffer, 'Z');
+    }
+    return buffer;
+}
 int pgGetGlyphNoSubstitute(PgFont *font, int c) {
     return font->getGlyph(font, c);
 }
@@ -495,9 +560,11 @@ PgFontFamily *pgScanFonts() {
     return _pgScanFonts();
 }
 PgFont *pgLoadFontHeader(const void *file, int fontIndex) {
+    if (pgIsSimpleFont(file)) return (PgFont*)pgLoadSimpleFontHeader(file, fontIndex);
     return (PgFont*)pgLoadOpenTypeFontHeader(file, fontIndex);
 }
 PgFont *pgLoadFont(const void *file, int fontIndex) {
+    if (pgIsSimpleFont(file)) return (PgFont*)pgLoadSimpleFont(file, fontIndex);
     return (PgFont*)pgLoadOpenTypeFont(file, fontIndex);
 }
 PgFont *pgLoadFontFromFile(const wchar_t *filename, int index) {
@@ -685,4 +752,135 @@ void pgStrokeHLine(Pg *g, PgPt a, float x2, float width, uint32_t color) {
 }
 void pgStrokeVLine(Pg *g, PgPt a, float y2, float width, uint32_t color) {
     pgStrokeLine(g, a, pgPt(a.x, y2), width, color);
+}
+PgPath *pgInterpretSvgPath(PgPath *path, const char *svg) {
+    PgPt    start = {0.0f, 0.0f};
+    PgPt    a = start;
+    PgPt    b = start;
+    PgPt    c = start;
+    PgPt    d = start;
+    float   args[6];
+    char    cmd = 0;
+    int     argsNeeded = 0;
+    
+    if (not path)
+        path = pgNewPath();
+    
+    while (true) {
+        while (*svg and (isspace(*svg) or *svg==',')) svg++;
+        
+        switch (tolower(*svg)) {
+        case 'c': argsNeeded = 6; cmd = *svg++; break;
+        case 'h': argsNeeded = 1; cmd = *svg++; break;
+        case 'l': argsNeeded = 2; cmd = *svg++; break;
+        case 'm': argsNeeded = 2; cmd = *svg++; break;
+        case 'q': argsNeeded = 4; cmd = *svg++; break;
+        case 's': argsNeeded = 4; cmd = *svg++; break;
+        case 't': argsNeeded = 2; cmd = *svg++; break;
+        case 'v': argsNeeded = 1; cmd = *svg++; break;
+        case 'z': argsNeeded = 0; cmd = *svg++; break;
+        case '0': case '1': case '2': case '3': case '4':
+        case '5': case '6': case '7': case '8': case '9':
+        case '-': case '+': case '.':
+            if (argsNeeded == 0) return path;
+            break;
+        default: return path; // invalid command
+        }
+        
+        const char *before = svg;
+        for (int i = 0; i < argsNeeded; i++) {
+            while (*svg and (isspace(*svg) or *svg==',')) svg++;
+            const char *before = svg;
+            args[i] = strtod(svg, (char**)&svg);
+            if (before == svg) svg++; // strtod will not accept -, +, or . without a digit after it
+        }
+        
+//        if (path->npoints == 0) puts("\n");
+//        putchar(cmd);
+//        for (int i = 0; i < argsNeeded; i++) printf(" %g", args[i]);
+//        putchar('\n');
+        
+        switch (cmd) {
+        case 'M':
+            a = pgPt(args[0], args[1]);
+            pgMove(path, a);
+            break;
+        case 'm':
+            a = pgAddPt(a, pgPt(args[0], args[1]));
+            pgMove(path, a);
+            break;
+        case 'L':
+            a = pgPt(args[0], args[1]);
+            pgLine(path, a);
+            break;
+        case 'l':
+            a = pgAddPt(a, pgPt(args[0], args[1]));
+            pgLine(path, a);
+            break;
+        case 'H':
+            a = pgPt(args[0], a.y);
+            pgLine(path, a);
+            break;
+        case 'h':
+            a = pgAddPt(a, pgPt(args[0], 0.0f));
+            pgLine(path, a);
+            break;
+        case 'V':
+            a = pgPt(a.x, args[0]);
+            pgLine(path, a);
+            break;
+        case 'v':
+            a = pgAddPt(a, pgPt(0, args[0]));
+            pgLine(path, a);
+            break;
+        case 'C':
+            b = pgPt(args[0], args[1]);
+            c = pgPt(args[2], args[3]);
+            a = pgPt(args[4], args[5]);
+            pgCubic(path, b, c, a);
+            break;
+        case 'c':
+            b = pgAddPt(a, pgPt(args[0], args[1]));
+            c = pgAddPt(a, pgPt(args[2], args[3]));
+            a = pgAddPt(a, pgPt(args[4], args[5]));
+            pgCubic(path, b, c, a);
+            break;
+        case 'S':
+            b = pgAddPt(a, pgSubtractPt(a, c));
+            c = pgPt(args[0], args[1]);
+            a = pgPt(args[2], args[3]);
+            pgCubic(path, b, c, a);
+            break;
+        case 's':
+            b = pgAddPt(a, pgSubtractPt(a, c));
+            c = pgAddPt(a, pgPt(args[0], args[1]));
+            a = pgAddPt(a, pgPt(args[2], args[3]));
+            pgCubic(path, b, c, a);
+            break;
+        case 'Q':
+            b = pgPt(args[0], args[1]);
+            a = pgPt(args[2], args[3]);
+            pgQuad(path, b, a);
+            break;
+        case 'q':
+            b = pgAddPt(a, pgPt(args[0], args[1]));
+            a = pgAddPt(a, pgPt(args[2], args[3]));
+            pgQuad(path, b, a);
+            break;
+        case 'T':
+            b = pgAddPt(a, pgSubtractPt(a, b));
+            a = pgPt(args[0], args[1]);
+            pgQuad(path, b, a);
+            break;
+        case 't':
+            b = pgAddPt(a, pgSubtractPt(a, b));
+            a = pgAddPt(a, pgPt(args[0], args[1]));
+            pgQuad(path, b, a);
+            break;
+        case 'Z':
+        case 'z':
+            pgClosePath(path);
+            break;
+        }
+    }
 }

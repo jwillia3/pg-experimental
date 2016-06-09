@@ -57,3 +57,4 @@ Pw *pwNewWindow(int width, int height, void (*event)(Pw *pw, int msg, PwEventArg
 bool pwWaitMessage();
 void pwClose(Pw *pw);
 void pwSize(Pw *pw, int width, int height);
+void pwRefresh(Pw *pw);

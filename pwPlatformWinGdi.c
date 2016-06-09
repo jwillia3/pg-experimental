@@ -1,5 +1,6 @@
 #define UNICODE
 #define WIN32_LEAN_AND_MEAN
+#include <iso646.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -34,7 +35,7 @@ static void drawChrome(Pw *pw, Pg *g) {
     float width = pgGetStringWidth(PwConf.font, title, -1);
     pgFillRect(g,
         pgPt(1.0f, 0.0f),
-        pgPt(g->width, 32.0f),
+        pgPt(g->width, 32.5f),
         PwConf.titleBg);
     pgFillString(g, PwConf.font,
         g->width / 2.0f - width / 2.0f, 32.0f / 2.0f - pgGetFontEm(PwConf.font) / 2.0f,
@@ -61,6 +62,8 @@ static void _exec(Pw *pw, int msg, PwEventArgs *e) {
     switch (msg) {
     case PWE_DRAW:
         drawChrome(pw, ((Window*) pw->sys)->chrome);
+        if (!e->draw.g)
+            e->draw.g = win->client;
         pw->event(pw, msg, e);
         
         HDC dc = GetWindowDC(win->hwnd);
@@ -170,18 +173,25 @@ LRESULT WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
         return 0;
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN:
+        unsigned key = MapVirtualKey(wparam, MAPVK_VK_TO_CHAR);
+        bool shift = GetKeyState(VK_SHIFT) & 0x8000;
+        bool capsLock = GetKeyState(VK_CAPITAL) & 1;
+        
+        if ((capsLock and shift) or (not capsLock and not shift))
+            key = tolower(key);
+        
         pw->sysEvent(pw, PWE_KEY_DOWN, &(PwEventArgs) {
             .key = {
                 .alt = lparam & (1 << 29),
-                .shift = GetKeyState(VK_SHIFT) & 0x8000,
+                .shift = shift,
                 .ctl = GetKeyState(VK_CONTROL) & 0x8000,
-                .key = wparam
+                .key = key,
             }});
         return 0;
     case WM_LBUTTONDOWN:
     case WM_MBUTTONDOWN:
     case WM_RBUTTONDOWN:
-        pw->sysEvent(pw, PWE_KEY_DOWN, &(PwEventArgs) {
+        pw->sysEvent(pw, PWE_MOUSE_DOWN, &(PwEventArgs) {
             .mouse = {
                 .alt = lparam & (1 << 29),
                 .shift = GetKeyState(VK_SHIFT) & 0x8000,
