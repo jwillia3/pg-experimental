@@ -105,10 +105,9 @@ static void segmentQuad(segs_t *segs, PgPt a, PgPt b, PgPt c, int n, float flatn
         addSeg(segs, a, c);
         return;
     }
-    float ab = distance(pgPt(a.x - b.x, a.y - b.y));
-    float bc = distance(pgPt(b.x - c.x, b.y - c.y));
-    float ac = distance(pgPt(a.x - c.x, a.y - c.y));
-    if (ab + bc >= flatness * ac) {
+    PgPt m = { (a.x + 2.0f * b.x + c.x) / 4.0f, (a.y + 2.0f * b.y + c.y) / 4.0f }; 
+    PgPt d = { (a.x + c.x) / 2.0f - m.x, (a.y + c.y) / 2.0f - m.y }; 
+    if (d.x * d.x + d.y * d.y > 0.05f) { 
         PgPt ab = midpoint(a, b);
         PgPt bc = midpoint(b, c);
         PgPt abc = midpoint(ab, bc);
