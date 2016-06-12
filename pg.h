@@ -4,14 +4,26 @@ typedef union {
     struct { PgPt a, b; };
 } PgRect;
 typedef struct { float a, b, c, d, e, f; } PgMatrix;
+typedef enum { PG_MOVE, PG_LINE, PG_QUAD, PG_CUBIC } PgPathStepType;
 typedef struct {
     int npoints, pointCap;
     int nsubs, subCap;
     int ntypes, typeCap;
     int *subs;
-    enum { PG_MOVE, PG_LINE, PG_QUAD, PG_CUBIC } *types;
+    PgPathStepType *types;
     PgPt *data;
 } PgPath;
+typedef struct {
+    PgPathStepType  type;
+    PgPt            *points;   
+} PgPathStep;
+typedef struct {
+    PgPath      *path;
+    int         point;
+    int         type;
+    int         sub;
+    PgPathStep  step;
+} PgPathStepData;
 typedef struct Pg Pg;
 struct Pg {
     int width;
@@ -146,6 +158,9 @@ void pgFreeStringBuffer(PgStringBuffer *buffer);
     void pgFillPath(Pg *g, PgPath *path, uint32_t color);
     void pgStrokePath(Pg *g, PgPath *path, float width, uint32_t color);
     PgRect pgGetPathBindingBox(PgPath *path, PgMatrix ctm);
+    PgPathStepData pgNewPathStepData(PgPath *path);
+    PgPathStep *pgNextPathStep(PgPathStepData *data);
+    PgPath *pgTransformPath(PgPath *path, PgMatrix ctm);
     PgStringBuffer *pgPathAsSvgPath(PgStringBuffer *buffer, PgPath *path);
 // Fonts
     PgFontFamily *pgScanFonts();

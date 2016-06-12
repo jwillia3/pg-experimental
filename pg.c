@@ -523,24 +523,38 @@ PgRect pgGetPathBindingBox(PgPath *path, PgMatrix ctm) {
     }
     return r;
 }
+PgPathStepData pgNewPathStepData(PgPath *path) {
+    return (PgPathStepData){.path=path,};
+}
+PgPathStep *pgNextPathStep(PgPathStepData *data) {
+    const PgPath *path = data->path;
+    if (data->point >= path->npoints) return NULL;
+    PgPt *points = &path->data[data->point];
+    PgPathStepType type =   data->point == 0 or data->point == path->subs[data->sub] ?
+                                data->sub++,
+                                PG_MOVE :
+                            path->types[data->type++];
+    data->point += type ? type : 1;
+    data->step = (PgPathStep){.type=type, points=points};
+    return &data->step;
+}
+PgPath *pgTransformPath(PgPath *path, PgMatrix ctm) {
+    pgTransformPoints(ctm, path->data, path->npoints);
+    return path;
+}
+
+    
 PgStringBuffer *pgPathAsSvgPath(PgStringBuffer *buffer, PgPath *path) {
     if (not buffer)
         buffer = pgNewStringBuffer();
-    PgPt *p = path->data;
-    int *t = (int*)path->types;
-    for (int *sub = path->subs; sub < path->subs + path->nsubs; sub++) {
-        pgBufferFormat(buffer, "M%g,%g", p[0].x, p[0].y);
-        p++;
-        for (PgPt *end = p + *sub - 1, next; p < end; p += *t++)
-            if (*t == PG_LINE)
-                pgBufferFormat(buffer, "L%g,%g", p[0].x, p[0].y);
-            else if (*t == PG_QUAD)
-                pgBufferFormat(buffer, "L%g,%g, %g,%g", p[0].x, p[0].y, p[1].x, p[1].y);
-            else if (*t == PG_CUBIC)
-                pgBufferFormat(buffer, "L%g,%g, %g,%g %g,%g", p[0].x, p[0].y, p[1].x, p[1].y, p[2].x, p[2].y);
-        if (sub + 1 < path->subs + path->nsubs)
-            pgBufferCharacter(buffer, 'Z');
-    }
+    PgPt *p;
+    for (PgPathStepData i = pgNewPathStepData(path); pgNextPathStep(&i) and (p = i.step.points); )
+        switch (i.step.type) {
+        case PG_MOVE:   pgBufferFormat(buffer, "M%g,%g", p[0].x, p[0].y); break;
+        case PG_LINE:   pgBufferFormat(buffer, "L%g,%g", p[0].x, p[0].y); break;
+        case PG_QUAD:   pgBufferFormat(buffer, "L%g,%g, %g,%g", p[0].x, p[0].y, p[1].x, p[1].y); break;
+        case PG_CUBIC:  pgBufferFormat(buffer, "L%g,%g, %g,%g %g,%g", p[0].x, p[0].y, p[1].x, p[1].y, p[2].x, p[2].y); break;
+        }
     return buffer;
 }
 int pgGetGlyphNoSubstitute(PgFont *font, int c) {
