@@ -113,6 +113,7 @@ static PgPath *_getGlyphPath(PgFont *font, PgPath *path, int glyph) {
         bool inCurve = false;
         int vx = 0, vy = 0;
         PgPt start;
+        int leadingInCurveIndex = -1;
         for (int i = 0, rep = 0, end = 0; i < npoints; i++) {
             int dx = *flags & 2? *flags & 16? *xs++: -*xs++:
                     *flags & 16? 0:
@@ -125,12 +126,17 @@ static PgPath *_getGlyphPath(PgFont *font, PgPath *path, int glyph) {
             PgPt p = { vx, vy };
             if (i == end) {
                 end = native16(*ends++) + 1;
-                if (inCurve)
+                if (leadingInCurveIndex != -1) {
+                    PgPt c = midpoint(path->data[leadingInCurveIndex], path->data[leadingInCurveIndex + 1]);
+                    pgQuad(path, path->data[leadingInCurveIndex], c);
+                    path->data[leadingInCurveIndex] = c;
+                } else if (inCurve)
                     pgQuad(path, b, start);
                 else
                     pgClosePath(path);
                 if (i != npoints - 1)
                     pgMove(path, p);
+                leadingInCurveIndex = ((~*flags & 1) && i != npoints - 1) ? path->npoints - 1 : -1;
                 start = a = p;
                 inCurve = false;
             } else if (~*flags & 1) // curve
@@ -161,7 +167,11 @@ static PgPath *_getGlyphPath(PgFont *font, PgPath *path, int glyph) {
             } else
                 flags++;
         }
-        if (inCurve)
+        if (leadingInCurveIndex != -1) {
+            PgPt c = midpoint(path->data[leadingInCurveIndex], path->data[leadingInCurveIndex + 1]);
+            pgQuad(path, path->data[leadingInCurveIndex], c);
+            path->data[leadingInCurveIndex] = c;
+        } else if (inCurve)
             pgQuad(path, b, start);
         else
             pgClosePath(path);
