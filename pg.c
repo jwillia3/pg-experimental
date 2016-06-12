@@ -801,11 +801,11 @@ PgPath *pgInterpretSvgPath(PgPath *path, const char *svg) {
         
         switch (cmd) {
         case 'M':
-            a = pgPt(args[0], args[1]);
+            start = a = pgPt(args[0], args[1]);
             pgMove(path, a);
             break;
         case 'm':
-            a = pgAddPt(a, pgPt(args[0], args[1]));
+            start = a = pgAddPt(a, pgPt(args[0], args[1]));
             pgMove(path, a);
             break;
         case 'L':
@@ -879,6 +879,7 @@ PgPath *pgInterpretSvgPath(PgPath *path, const char *svg) {
         case 'Z':
         case 'z':
             pgClosePath(path);
+            a = start;
             break;
         }
     }
