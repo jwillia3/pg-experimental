@@ -171,6 +171,7 @@ void pgFreeStringBuffer(PgStringBuffer *buffer);
     PgOpenTypeFont *pgLoadOpenTypeFont(const void *file, int fontIndex);
     struct PgSimpleFont *pgLoadSimpleFontHeader(const void *file, int fontIndex);
     struct PgSimpleFont *pgLoadSimpleFont(const void *file, int fontIndex);
+    bool pgIsSimpleFont(const void *file);
     
     float pgGetFontEm(PgFont *font);
     float pgGetFontHeight(PgFont *font);

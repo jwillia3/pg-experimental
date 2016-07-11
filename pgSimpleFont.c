@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include <iso646.h>
 #include <math.h>
 #include <stdbool.h>

@@ -1,5 +1,6 @@
 #define BEZIER_LIMIT 10
 #include <assert.h>
+#include <ctype.h>
 #include <float.h>
 #include <iso646.h>
 #include <math.h>
