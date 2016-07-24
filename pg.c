@@ -180,6 +180,15 @@ static void bmp_clear(Pg *g, uint32_t color) {
         for (int x = 0; x < g->width; x++)
             g->bmp[y * g->stride + x] = color;
 }
+static void bmp_clearSection(Pg *g, PgPt a, PgPt b, uint32_t color) {
+    int x1 = clamp(g->clip.a.x, a.x, g->clip.b.x);
+    int x2 = clamp(g->clip.a.x, ceil(b.x), g->clip.b.x);
+    int y1 = clamp(g->clip.a.y, a.y, g->clip.b.y);
+    int y2 = clamp(g->clip.a.y, ceil(b.y), g->clip.b.y);
+    for (int y = y1; y < y2; y++)
+    for (int x = x1; x < x2; x++)
+        g->bmp[y * g->stride + x] = color;
+}
 static void bmp_free(Pg *g) {
     if (!g->borrowed)
         free(g->bmp);
@@ -357,6 +366,7 @@ Pg *pgNewBitmapCanvas(int width, int height) {
     g->flatness = 1.001f;
     g->resize = bmp_resize;
     g->clear = bmp_clear;
+    g->clearSection = bmp_clearSection;
     g->free = bmp_free;
     g->fillPath = bmp_fillPath;
     g->strokePath = bmp_strokePath;
@@ -375,6 +385,9 @@ void pgSetGamma(Pg *g, float gamma) {
 }
 void pgClearCanvas(Pg *g, uint32_t color) {
     g->clear(g, color);
+}
+void pgClearSection(Pg *g, PgPt a, PgPt b, uint32_t color) {
+    g->clearSection(g, a, b, color);
 }
 void pgFreeCanvas(Pg *g) {
     g->free(g);

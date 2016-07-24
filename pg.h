@@ -34,6 +34,7 @@ struct Pg {
     float flatness;
     void (*resize)(Pg *pg, int width, int height);
     void (*clear)(Pg *pg, uint32_t color);
+    void (*clearSection)(Pg *pg, PgPt a, PgPt b, uint32_t color);
     void (*free)(Pg *pg);
     void (*fillPath)(Pg *g, PgPath *path, uint32_t color);
     void (*strokePath)(Pg *g, PgPath *path, float width, uint32_t color);
@@ -122,6 +123,7 @@ void pgFreeStringBuffer(PgStringBuffer *buffer);
     Pg *pgNewBitmapCanvas(int width, int height);
     Pg *pgSubsectionCanvas(Pg *g, PgRect rect);
     void pgClearCanvas(Pg *g, uint32_t color);
+    void pgClearSection(Pg *g, PgPt a, PgPt b, uint32_t color);
     void pgFreeCanvas(Pg *g);
     void pgResizeCanvas(Pg *g, int width, int height);
     
