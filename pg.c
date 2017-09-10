@@ -611,7 +611,7 @@ PgFont *pgLoadFontFromFile(const wchar_t *filename, int index) {
 PgFont *pgOpenFont(const wchar_t *family, int weight, bool italic) {
     weight /= 100;
     if (weight == 0)
-        weight = 3;
+        weight = 4;
     else if (weight >= 10)
         return NULL;
     pgScanFonts();
