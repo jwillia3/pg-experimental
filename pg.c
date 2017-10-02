@@ -304,6 +304,7 @@ static void bmp_fillPath(Pg *g, PgPath *path, uint32_t color) {
             }
         }
         uint32_t *__restrict bmp = g->bmp + scanY * g->stride;
+        minx = max(minx, 0);
         maxx = min(maxx, g->clip.x2 - 1);
         for (int i = minx; i <= maxx; i++)
             bmp[i] = blend(color, bmp[i], buf[i], g->gammaTable, g->gamma);
@@ -344,12 +345,15 @@ static void bmp_strokePath(Pg *g, PgPath *path, float width, uint32_t color) {
 static Pg *bmp_subsection(Pg *original, PgRect rect) {
     Pg *g = malloc(sizeof *g);
     *g = *original;
-    rect.a.x = clamp(0, rect.a.x, g->width);
-    rect.b.x = clamp(0, rect.b.x, g->width);
-    g->width = clamp(0, rect.b.x - rect.a.x, g->width);
-    g->height = clamp(0, rect.b.y - rect.a.y, g->height);
-    g->clip.b.x = min(g->clip.b.x, g->width);
-    g->clip.b.y = min(g->clip.b.y, g->height);
+    rect.a = pgPt(clamp(0, rect.a.x, g->width), clamp(0, rect.a.y, g->height));
+    rect.b = pgPt(clamp(rect.a.x, rect.b.x, g->width), clamp(rect.a.y, rect.b.y, g->height));
+    g->clip = (PgRect){
+        clamp(0, g->clip.a.x - rect.a.x, rect.b.x),
+        clamp(0, g->clip.a.y - rect.a.y, rect.b.y),
+        clamp(0, g->clip.b.x - rect.a.x, rect.b.x - rect.a.x),
+        clamp(0, g->clip.b.y - rect.a.y, rect.b.y - rect.a.y)};
+    g->width = rect.b.x - rect.a.x;
+    g->height = rect.b.y - rect.a.y;
     g->borrowed = true;
     g->bmp += (int)rect.a.x + (int)rect.a.y * original->stride;
     return g;
