@@ -1,249 +1,181 @@
-#define UNICODE
+#define _WIN32_WINNT    0x0501
 #define WIN32_LEAN_AND_MEAN
+#define UNICODE
 #include <iso646.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <wchar.h>
 #include <windows.h>
 #include <pg.h>
 #include <pw.h>
-#include <platform.h>
-#pragma comment(lib, "user32.lib")
-#pragma comment(lib, "gdi32.lib")
+#pragma comment(lib, "user32")
+#pragma comment(lib, "gdi32")
+#pragma comment(lib, "pg")
 
-typedef struct {
-    HWND hwnd;
-    Pg *client;
-    Pg *chrome;
-    HBITMAP dib;
-} Window;
+static HMODULE  shcore;
+static HRESULT (WINAPI *GetDpiForMonitor)(HMONITOR, int, unsigned*, unsigned*);
+static HWND     app_window;
+float    PwDpi = 72.0f;
 
-enum {
-    MouseTolorance = 5
-};
-
-static void drawChrome(Pw *pw, Pg *g) {
-    Window *win = pw->sys;
+static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
+    PAINTSTRUCT ps;
+    Pg *gs = GetProp(hwnd, L"gs");
     
-    int len = GetWindowTextLength(win->hwnd);
-    wchar_t *title = malloc((len + 1) * sizeof (wchar_t));
-    GetWindowText(win->hwnd, title, len + 1);
-    
-    float width = pgGetStringWidth(PwConf.font, title, -1);
-    pgFillRect(g,
-        pgPt(1.0f, 0.0f),
-        pgPt(g->width, 32.5f),
-        PwConf.titleBg);
-    pgFillString(g, PwConf.font,
-        g->width / 2.0f - width / 2.0f, 32.0f / 2.0f - pgGetFontEm(PwConf.font) / 2.0f,
-        title, len, PwConf.titleFg);
-    free(title);
-    
-    const float _1_4 = 32.0f * 3.0f / 8.0f;
-    const float _3_4 = 32.0f * 5.0f / 8.0f;
-    pgTranslate(g, g->width - 32.0f * 3, 0.0f);
-    pgFillRect(g, pgPt(0.0f, 0.0f), pgPt(32.0f * 3.0f, 32.0f),
-        pgBlend(PwConf.border, PwConf.titleBg, 128));
-    pgStrokeLine(g, pgPt(_1_4, _3_4), pgPt(_3_4, _3_4), 5.0f, PwConf.border);
-    pgTranslate(g, 32.0f, 0.0f);
-    pgStrokeRect(g, pgPt(_1_4, _1_4), pgPt(_3_4, _3_4), 5.0f, PwConf.border);
-    pgTranslate(g, 32.0f, 0.0f);
-    pgStrokeLine(g, pgPt(_1_4, _1_4), pgPt(_3_4, _3_4), 5.0f, PwConf.border);
-    pgStrokeLine(g, pgPt(_3_4, _1_4), pgPt(_1_4, _3_4), 5.0f, PwConf.border);
-}
-
-static void _event(Pw *pw, int msg, PwEventArgs *e) {
-}
-static void _exec(Pw *pw, int msg, PwEventArgs *e) {
-    Window *win = pw->sys;
     switch (msg) {
-    case PWE_DRAW:
-        drawChrome(pw, ((Window*) pw->sys)->chrome);
-        if (!e->draw.g)
-            e->draw.g = win->client;
-        pw->event(pw, msg, e);
-        
-        HDC dc = GetWindowDC(win->hwnd);
-        HDC cdc = CreateCompatibleDC(dc);
-        HGDIOBJ old = SelectObject(cdc, win->dib);
-        UpdateLayeredWindow(win->hwnd, dc, NULL,
-            &(SIZE) { win->chrome->width, win->chrome->height },
-            cdc, &(POINT) { 0, 0 }, 0, NULL, ULW_OPAQUE);
-        SelectObject(cdc, old);
+    case WM_PAINT: {
+        BeginPaint(hwnd, &ps);
+        HDC cdc = CreateCompatibleDC(ps.hdc);
+        SelectObject(cdc, GetProp(hwnd, L"bmp"));
+        pwDrawPanel(PwApp, gs);
+        BitBlt(ps.hdc, ps.rcPaint.left, ps.rcPaint.top, ps.rcPaint.right, ps.rcPaint.bottom,
+            cdc, ps.rcPaint.left, ps.rcPaint.top, SRCCOPY);
         DeleteDC(cdc);
-        ReleaseDC(win->hwnd, dc);
-        break;
-    case PWE_SIZE:
-        SetWindowPos(win->hwnd, NULL, 0, 0, e->size.width, e->size.height,
-            SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOZORDER);
-        break;
-    case PWE_CLOSE:
-        DestroyWindow(win->hwnd);
-        break;
-    }
-}
-static void _sysEvent(Pw *pw, int msg, PwEventArgs *e) {
-    Window *win = pw->sys;
-    switch (msg) {
-    case PWE_DRAW:
-        drawChrome(pw, win->chrome);
-        break;
-    case PWE_KEY_DOWN:
-        if (e->key.alt)
-            if (e->key.key == VK_F4) {
-                PostMessage(win->hwnd, WM_SYSCOMMAND, SC_CLOSE, 0);
-                return;
-            }
-        pw->event(pw, msg, e);
-        break;
-    
-    case PWE_SIZE:
-        if (win->chrome)
-            pgFreeCanvas(win->chrome),
-            pgFreeCanvas(win->client),
-            DeleteObject(win->dib);
-        win->chrome = pgNewBitmapCanvas(e->size.width, e->size.height);
-        free(win->chrome->bmp);
-        win->chrome->bmp = NULL;
-        win->chrome->borrowed = true;
-        win->dib = CreateDIBSection(NULL,
-            &(BITMAPINFO) {
-                .bmiHeader = {
-                    sizeof (BITMAPINFOHEADER),
-                    e->size.width,
-                    -e->size.height,
-                    1, 32, 0, e->size.width * e->size.height * 4,
-                    96, 96, -1, -1 }},
-            DIB_RGB_COLORS,
-            &win->chrome->bmp,
-            NULL, 0);
-        win->client = pgSubsectionCanvas(win->chrome,
-            pgRect(pgPt(1.0f, 32.0f), pgPt(e->size.width - 1.0f, e->size.height - 1.0f)));
-        pw->rect = pgRect(pgPt(0, 0), pgPt(e->size.width, e->size.height));
-        pw->exec(pw, PWE_DRAW, &(PwEventArgs) { .draw.g = win->client });
-        break;
-    default:
-        pw->event(pw, msg, e);
-    }
-}
-
-LRESULT WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
-    Pw *pw = GetProp(hwnd, L"Pw");
-    Window *win = pw? pw->sys: NULL;
-    switch (msg) {
-    case WM_NCHITTEST:
-        RECT r;
-        GetWindowRect(hwnd, &r);
-        int x = LOWORD(lparam) - r.left;
-        int y = HIWORD(lparam) - r.top;
-        int width = win->chrome->width;
-        int height = win->chrome->height;
-        
-        if (x < MouseTolorance)
-            return y < MouseTolorance? HTTOPLEFT:
-                height - y < MouseTolorance? HTBOTTOMLEFT:
-                HTLEFT;
-        if (width - x < MouseTolorance)
-            return y < MouseTolorance? HTTOPRIGHT:
-                height - y < MouseTolorance? HTBOTTOMRIGHT:
-                HTRIGHT;
-        if (height - y < MouseTolorance)
-            return HTBOTTOM;
-        if (y < 32)
-            if (abs(width - x) < 32)
-                return HTCLOSE;
-            else if (abs(width - x) < 32 * 2)
-                return HTMAXBUTTON;
-            else if (abs(width - x) < 32 * 3)
-                return HTMINBUTTON;
-            else if (y < MouseTolorance)
-                return HTTOP;
-            else return HTCAPTION;
-        return HTCLIENT;
-    case WM_SIZE:
-        if (pw)
-            pw->sysEvent(pw, PWE_SIZE, &(PwEventArgs) {
-                .size = {
-                    .width = LOWORD(lparam),
-                    .height = HIWORD(lparam),
-                }});
+        EndPaint(hwnd, &ps);
         return 0;
-    case WM_KEYDOWN:
-    case WM_SYSKEYDOWN:
-        unsigned key = MapVirtualKey(wparam, MAPVK_VK_TO_CHAR);
-        bool shift = GetKeyState(VK_SHIFT) & 0x8000;
-        bool capsLock = GetKeyState(VK_CAPITAL) & 1;
-        
-        if ((capsLock and shift) or (not capsLock and not shift))
-            key = tolower(key);
-        
-        pw->sysEvent(pw, PWE_KEY_DOWN, &(PwEventArgs) {
-            .key = {
-                .alt = lparam & (1 << 29),
-                .shift = shift,
-                .ctl = GetKeyState(VK_CONTROL) & 0x8000,
-                .key = key,
-            }});
+        }
+    case WM_ERASEBKGND:
         return 0;
+    case WM_SIZE: {
+            int width = (short)LOWORD(lparam);
+            int height = (short)HIWORD(lparam);
+            HBITMAP bmp = GetProp(hwnd, L"bmp");
+            DeleteObject(bmp);
+            void *data = NULL;
+            bmp = CreateDIBSection(NULL,
+                &(BITMAPINFO){{sizeof(BITMAPINFOHEADER), width, -height,
+                    1, 32, 0, width * height, PwDpi, PwDpi, 0xffffff, 0xffffff}},
+                DIB_RGB_COLORS, &data, NULL, 0);
+            SetProp(hwnd, L"bmp", bmp);
+            gs->bmp = NULL;
+            pgResizeCanvas(gs, width, height);
+            gs->bmp = data;
+            pwLayout(PwApp, width, height);
+            return 0;
+        }
+    case 0x02E0: { // case WM_DPICHANGED: // Windows 8.1
+			RECT r = *(RECT*)lparam;
+			PwDpi = LOWORD(wparam) / 72.0f;
+			SetWindowPos(hwnd, NULL,
+				r.left,
+				r.top,
+				r.right - r.left,
+				r.bottom - r.top,
+				SWP_NOZORDER|SWP_NOACTIVATE);
+            return 0;
+		}
     case WM_LBUTTONDOWN:
-    case WM_MBUTTONDOWN:
-    case WM_RBUTTONDOWN:
-        pw->sysEvent(pw, PWE_MOUSE_DOWN, &(PwEventArgs) {
-            .mouse = {
-                .alt = lparam & (1 << 29),
-                .shift = GetKeyState(VK_SHIFT) & 0x8000,
-                .ctl = GetKeyState(VK_CONTROL) & 0x8000,
-                .at = pgPt(LOWORD(lparam), HIWORD(lparam))
-            }});
+	case WM_MBUTTONDOWN:
+	case WM_RBUTTONDOWN: {
+            int x = (short)LOWORD(lparam);
+            int y = (short)HIWORD(lparam);
+            Pw *panel = pwTargetPanel(PwApp, x, y);
+    		for (Pw *p = panel; p; p = p->parent)
+    			if (p->clicked_down and p->clicked_down(p, x - p->win_x, y - p->win_y)) return 0;
+    		return 0;
+        }
+    case WM_LBUTTONUP:
+	case WM_MBUTTONUP:
+	case WM_RBUTTONUP: {
+            int x = (short)LOWORD(lparam);
+            int y = (short)HIWORD(lparam);
+            Pw *panel = pwTargetPanel(PwApp, x, y);
+    		for (Pw *p = panel; p; p = p->parent)
+    			if (p->clicked and p->clicked(p, x - p->win_x, y - p->win_y)) {
+                    if (p->focus == NULL or not p->focus(p))
+                        pwSetActivePanel(p);
+                    return 0;
+                }
+    		return 0;
+        }
+	case WM_MOUSEMOVE: {
+            int x = (short)LOWORD(lparam);
+            int y = (short)HIWORD(lparam);
+            Pw *panel = pwTargetPanel(PwApp, x, y);
+    		for (Pw *p = panel; p; p = p->parent)
+    			if (p->mouse_moved and p->mouse_moved(p, x - p->win_x, y - p->win_y)) return 0;
+    		return 0;
+        }
+    case WM_MOUSEWHEEL: {
+			int delta = (short)HIWORD(wparam);
+			POINT pt = {(short)LOWORD(lparam), (short)HIWORD(lparam)};
+			ScreenToClient(hwnd, &pt);
+			Pw *panel = pwTargetPanel(PwApp, pt.x, pt.y);
+			for (Pw *p = panel; p; p = p->parent)
+				if (p->wheel_rolled and p->wheel_rolled(p, delta)) return 0;
+            return 0;
+		}
+    case WM_KEYDOWN:
+        if (PwActive)
+            for (Pw *p = PwActive; p; p = p->parent)
+                if (p->key_pressed and p->key_pressed(p, wparam)) return 0;
+        if (PwApp and PwApp->key_pressed) PwApp->key_pressed(PwApp, wparam);
         return 0;
-    
+    case WM_CHAR:
+        if (PwActive)
+            for (Pw *p = PwActive; p; p = p->parent)
+                if (p->char_pressed and p->char_pressed(p, wparam)) return 0;
+        if (PwApp and PwApp->char_pressed) PwApp->char_pressed(PwApp, wparam);
+        return 0;
+    case WM_CREATE:
+		app_window = hwnd;
+        gs = pgNewBitmapCanvas(0, 0);
+        SetProp(hwnd, L"gs", gs);
+        
+        if (GetDpiForMonitor) {
+            enum { MDT_EFFECTIVE_DPI = 0 };
+            HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+            unsigned tmpDpi;
+            if (GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &tmpDpi, &tmpDpi) == S_OK)
+                PwDpi = tmpDpi / 72.0f;
+            CloseHandle(monitor);
+        } else {
+            HDC hdc = GetDC(hwnd);
+            PwDpi = GetDeviceCaps(hdc, LOGPIXELSY) / 72.0f;
+            ReleaseDC(hwnd, hdc);
+        }
+        return 0;
     case WM_DESTROY:
         PostQuitMessage(0);
         return 0;
     }
     return DefWindowProc(hwnd, msg, wparam, lparam);
 }
-
-Pw *pwNewWindow(int width, int height, void (*event)(Pw *pw, int msg, PwEventArgs *e)) {
-    Pw *pw = calloc(1, sizeof *pw);
-    pw->event = event? event: _event;
-    pw->sysEvent = _sysEvent;
-    pw->exec = _exec;
-    Window *win = calloc(1, sizeof *win);
-    pw->sys = win;
-    win->hwnd = CreateWindowEx(
-        WS_EX_LAYERED,
-        L"Pw", L"Window",
-        WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-        CW_USEDEFAULT, CW_USEDEFAULT, 100, 100,
-        NULL, NULL, GetModuleHandle(NULL), NULL);
-    SetProp(win->hwnd, L"Pw", pw);
-    pwSize(pw, width, height);
-    return pw;
-}
-
-bool pwWaitMessage() {
-    MSG msg;
-    if (!GetMessage(&msg, NULL, 0, 0))
-        return false;
-    DispatchMessage(&msg);
-    return true;
-}
-
 static void init() {
-    WNDCLASS wc = { CS_HREDRAW|CS_VREDRAW, WndProc, 0, 0,
-        GetModuleHandle(NULL), LoadIcon(NULL, IDI_APPLICATION),
-        LoadCursor(NULL, IDC_ARROW), (HBRUSH)(COLOR_WINDOW + 1),
-        NULL, L"Pw" };
-    RegisterClass(&wc);
+    if (shcore = LoadLibrary(L"shcore.dll")) {
+        HRESULT (*SetProcessDpiAwareness)(INT) = (void*) GetProcAddress(shcore, "SetProcessDpiAwareness");
+        GetDpiForMonitor = (void*) GetProcAddress(shcore, "GetDpiForMonitor");
+        if (SetProcessDpiAwareness)
+            SetProcessDpiAwareness(2);
+    }
+    RegisterClass(&(WNDCLASS){CS_DBLCLKS|CS_HREDRAW|CS_VREDRAW,
+        WndProc, 0, 0, 0, LoadIcon(0, IDI_APPLICATION),
+        LoadCursor(0, IDC_ARROW), (HBRUSH)(COLOR_WINDOW+1),
+        0, L"Window"});
 }
-
-int WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
+static bool update_app(Pw *app) {
+	InvalidateRect(app_window, NULL, FALSE);
+	return true;
+}
+Pw *pwNewAppPanel(int width, int height) {
+    RECT rt;
+    SetRect(&rt, 0, 0, width, height);
+    AdjustWindowRect(&rt, WS_OVERLAPPEDWINDOW | WS_VISIBLE, 0);
+    CreateWindowEx(0, L"Window", L"",
+        WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+        CW_USEDEFAULT,CW_USEDEFAULT,rt.right-rt.left,rt.bottom-rt.top,
+        0, 0, GetModuleHandle(0), 0);
+	return PwApp = PW_NEW_PANEL(.width=width, .height=height, .update=update_app);
+}
+bool pwYield() {
+    MSG msg;
+    if (GetMessage(&msg,0,0,0)) {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+        return true;
+    }
+    return false;
+}
+int WinMain(HINSTANCE inst, HINSTANCE prev, char *cmd, int show) {
+	extern int pwMain();
+	extern void pwInit();
+	pwInit();
     init();
-    _pwInit();
-    extern int pwMain();
-    return pwMain();
+	return pwMain();
 }

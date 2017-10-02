@@ -1,3 +1,7 @@
+#include <stdbool.h>
+#include <stdint.h>
+#pragma comment(lib, "pg")
+
 typedef struct { float x, y; } PgPt;
 typedef union {
     struct { float x1, y1, x2, y2; };
