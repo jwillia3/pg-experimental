@@ -48,7 +48,8 @@ struct Pg {
     int stride;
     bool borrowed;
     float gamma;
-    float gammaTable[256];
+    uint16_t toLinear[256];
+    uint8_t toGamma[32768 + 1];
 };
 typedef struct PgFont PgFont;
 struct PgFont {
@@ -112,8 +113,8 @@ static PgPt pgPt(float x, float y) { return (PgPt){x,y}; }
 static PgPt pgAddPt(PgPt a, PgPt b) { return (PgPt){a.x + b.x, a.y + b.y}; }
 static PgPt pgSubtractPt(PgPt a, PgPt b) { return (PgPt){a.x - b.x, a.y - b.y}; }
 static PgRect pgRect(PgPt a, PgPt b) { return (PgRect){ .a = a, .b = b }; }
-uint32_t pgBlendWithGamma(uint32_t fg, uint32_t bg, uint32_t a255, float *gammaTable, float gamma);
-uint32_t pgBlend(uint32_t fg, uint32_t bg, uint32_t a);
+uint32_t pgBlendWithGamma(uint32_t fg, uint32_t bg, uint8_t a255, uint16_t *toLinear, uint8_t *toGamma);
+uint32_t pgBlend(uint32_t fg, uint32_t bg, uint8_t a);
 
 unsigned pgStepUtf8(const uint8_t **input);
 uint8_t *pgOutputUtf8(uint8_t **output, unsigned c);

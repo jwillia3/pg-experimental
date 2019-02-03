@@ -146,28 +146,31 @@ static int sortSegsDescending(const void *x, const void *y) {
         a->a.x > b->a.x? 1: 0;
 }
 
-static void initGammaTable(float *gammaTable, float gamma) {
-    for (float i = 0; i < 256.0f; i++)
-        gammaTable[(int)i] = powf(i, gamma);
+static void initGammaTable(uint16_t *toLinear, uint8_t *toGamma, float gamma) {
+    for (int i = 0; i < 256; i++)
+        toLinear[i] = pow(i / 255.0, gamma) * 32768.0 + 0.5;
+    for (int i = 0; i < 32768; i++)
+        toGamma[i] = pow(i / 32768.0, 1.0 / gamma) * 255.0 + 0.5;
 }
-static uint32_t blend(uint32_t fg, uint32_t bg, uint32_t a255, float *gammaTable, float gamma) {
+static uint32_t fastblend(uint32_t fg, uint32_t bg, uint8_t a255, uint16_t *toLinear, uint8_t *toGamma) {
     if (a255 == 255) return fg;
     if (a255 == 0) return bg;
-    float a = a255 / 255.0f;
-    float na = 1.0f - a;
-    uint8_t r = powf(a * gammaTable[fg >> 16 & 255] + na * gammaTable[bg >> 16 & 255], 1.0f / gamma);
-    uint8_t g = powf(a * gammaTable[fg >>  8 & 255] + na * gammaTable[bg >>  8 & 255], 1.0f / gamma);
-    uint8_t b = powf(a * gammaTable[fg >>  0 & 255] + na * gammaTable[bg >>  0 & 255], 1.0f / gamma);
+    int a = a255 + 1;
+    int na = 255 - a;
+    uint8_t r = toGamma[(a * toLinear[fg >> 16 & 255] + na * toLinear[bg >> 16 & 255]) / 256];
+    uint8_t g = toGamma[(a * toLinear[fg >> 8 & 255] + na * toLinear[bg >> 8 & 255]) / 256];
+    uint8_t b = toGamma[(a * toLinear[fg >> 0 & 255] + na * toLinear[bg >> 0 & 255]) / 256];
     return (r << 16) + (g << 8) + b;
 }
-uint32_t pgBlendWithGamma(uint32_t fg, uint32_t bg, uint32_t a255, float *gammaTable, float gamma) {
-    return blend(fg, bg, a255, gammaTable, gamma);
+uint32_t pgBlendWithGamma(uint32_t fg, uint32_t bg, uint8_t a255, uint16_t *toLinear, uint8_t *toGamma) {
+    return fastblend(fg, bg, a255, toLinear, toGamma);
 }
-uint32_t pgBlend(uint32_t fg, uint32_t bg, uint32_t a255) {
-    static float gammaTable[256];
-    if (!gammaTable[255])
-        initGammaTable(gammaTable, 2.2f);
-    return blend(fg, bg, a255, gammaTable, 2.2f);
+uint32_t pgBlend(uint32_t fg, uint32_t bg, uint8_t a255) {
+    static uint16_t toLinear[256];
+    static uint8_t toGamma[32768 + 1];
+    if (!toLinear[255])
+        initGammaTable(toLinear, toGamma, 2.2f);
+    return fastblend(fg, bg, a255, toLinear, toGamma);
 }
 
 
@@ -307,7 +310,7 @@ static void bmp_fillPath(Pg *g, PgPath *path, uint32_t color) {
         minx = max(minx, 0);
         maxx = min(maxx, g->clip.x2 - 1);
         for (int i = minx; i <= maxx; i++)
-            bmp[i] = blend(color, bmp[i], buf[i], g->gammaTable, g->gamma);
+            bmp[i] = fastblend(color, bmp[i], buf[i], g->toLinear, g->toGamma);
     }
     free(buf);
     free(edges);
@@ -362,7 +365,7 @@ static void bmp_setGamma(Pg *pg, float gamma) {
     if (pg->gamma == gamma)
         return;
     pg->gamma = gamma;
-    initGammaTable(pg->gammaTable, gamma);
+    initGammaTable(pg->toLinear, pg->toGamma, gamma);
 }
 Pg *pgNewBitmapCanvas(int width, int height) {
     Pg *g = calloc(1, sizeof *g);
@@ -789,7 +792,6 @@ PgPath *pgInterpretSvgPath(PgPath *path, const char *svg) {
     PgPt    a = start;
     PgPt    b = start;
     PgPt    c = start;
-    PgPt    d = start;
     float   args[6];
     char    cmd = 0;
     int     argsNeeded = 0;
