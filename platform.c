@@ -104,18 +104,13 @@ void _pgScanDirectory(const wchar_t *dir, void perFile(const wchar_t *name, void
         FindClose(h);
     }
 }
-const wchar_t *_pgGetHomeDir() {
+static const wchar_t *getCacheDir() {
     static wchar_t dir[MAX_PATH];
-    GetEnvironmentVariable(L"USERPROFILE", dir, MAX_PATH);
-    return dir;
-}
-const wchar_t *_pgGetConfigDir() {
-    static wchar_t dir[MAX_PATH];
-    const wchar_t *home = _pgGetHomeDir();
-    if (!home)
-        return NULL;
-    wcscpy(dir, home);
-    wcscat(dir, L"/.pg");
+    if (GetEnvironmentVariable(L"XDG_CACHE_HOME", dir, MAX_PATH))
+        ;
+    else if (GetEnvironmentVariable(L"USERPROFILE", dir, MAX_PATH))
+        wcscat(dir, L"/.cache");
+    CreateDirectory(dir, NULL);
     return dir;
 }
 static void scanPerFile(const wchar_t *filename, void *data) {
@@ -161,20 +156,26 @@ static void scanPerFile(const wchar_t *filename, void *data) {
 }
 PgFontFamily *_pgScanFonts() {
     static wchar_t dir[MAX_PATH];
+    static wchar_t localdir[MAX_PATH];
     static wchar_t path[MAX_PATH];
     GetEnvironmentVariable(L"WINDIR", dir, MAX_PATH);
     wcscat(dir, L"/Fonts");
+    GetEnvironmentVariable(L"USERPROFILE", localdir, MAX_PATH);
+    wcscat(localdir, L"/AppData/Local/Microsoft/Windows/Fonts");
     
     struct __stat64 statBuf;
     if (!_wstat64(dir, &statBuf))
         FontDirTime = statBuf.st_mtime;
+    if (!_wstat64(localdir, &statBuf))
+        FontDirTime = statBuf.st_mtime > FontDirTime?
+            statBuf.st_mtime:
+            FontDirTime;
     
-    const wchar_t *config = _pgGetConfigDir();
-    if (!config)
+    const wchar_t *cache = getCacheDir();
+    if (!cache)
         return PgFontFamilies;
-    wcscpy(path, config);
-    CreateDirectory(path, NULL);
-    wcscat(path, L"/fonts");
+    wcscpy(path, cache);
+    wcscat(path, L"/.pg2-fonts");
     
     // Load font list from cache file
     FILE *file = _wfopen(path, L"r");
@@ -223,6 +224,7 @@ PgFontFamily *_pgScanFonts() {
     PgFontFamilies = NULL;
     PgNFontFamilies = 0;
     _pgScanDirectory(dir, scanPerFile);
+    _pgScanDirectory(localdir, scanPerFile);
     FontMemoryCacheTime = time(NULL);
     
     // Write to cache if possible

@@ -1,7 +1,5 @@
 void *_pgMapFile(void **hostp, const wchar_t *filename);
 void _pgFreeFileMap(void *host);
-const wchar_t *_pgGetHomeDir();
-const wchar_t *_pgGetConfigDir();
 PgFontFamily *_pgScanFonts();
 
 int16_t native16(int16_t x);
