@@ -183,7 +183,7 @@ static PgPath *_getGlyphPath(PgFont *font, PgPath *path, int glyph) {
             uint16_t index = nativeu16(*base++);
             
             float a = 1, b = 0, c = 0, d = 1, e = 0, f = 0;
-            if (flags & 3 == 3) { // x & y words
+            if ((flags & 3) == 3) { // x & y words
                 e = native16(*base++);
                 f = native16(*base++);
             } else if (flags & 2) { // x & y bytes

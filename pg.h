@@ -107,6 +107,7 @@ typedef struct PgStringBuffer {
 
 PgFontFamily    *PgFontFamilies;
 int             PgNFontFamilies;
+static PgPt     pgZero;
 
 
 static PgPt pgPt(float x, float y) { return (PgPt){x,y}; }

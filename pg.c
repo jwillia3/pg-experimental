@@ -179,8 +179,8 @@ static void bmp_clear(Pg *g, uint32_t color) {
         for (int i = 0; i < g->stride * g->height; i++)
             g->bmp[i] = color;
     else
-        for (int y = 0; y < g->height; y++)
-        for (int x = 0; x < g->width; x++)
+        for (int y = g->clip.y1; y < g->clip.y2; y++)
+        for (int x = g->clip.x1; x < g->clip.x2; x++)
             g->bmp[y * g->stride + x] = color;
 }
 static void bmp_clearSection(Pg *g, PgPt a, PgPt b, uint32_t color) {
