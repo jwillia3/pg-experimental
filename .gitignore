@@ -1,3 +1,5 @@
 *.ilk
 *.obj
 *.pdb
+*.o
+

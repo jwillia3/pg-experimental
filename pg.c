@@ -10,15 +10,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <wchar.h>
 #include "pg.h"
 #include "platform.h"
 #include "util.h"
 
 #define trailing(n) ((in[n] & 0xC0) == 0x80)
 #define overlong(n) (out < n? out = 0xfffd: out)
-unsigned pgStepUtf8(const uint8_t **input) {
+unsigned pgStepUtf8(const char **input) {
     unsigned out;
-    const uint8_t *in = *input;
+    const uint8_t *in = (const uint8_t*) *input;
     if (*in < 0x80)
         out = *in++;
     else if (~*in & 0x20 && in[1] && trailing(1))
@@ -36,21 +37,35 @@ unsigned pgStepUtf8(const uint8_t **input) {
         while ((*++in & 0xc0) == 0x80);
         out = 0xfffd;
     }
-    *input = in;
+    *input = (const char*) in;
     return out;
 }
-uint8_t *pgOutputUtf8(uint8_t **output, unsigned c) {
+char *pgOutputUtf8(char **output, unsigned c) {
     if (c < 0x80)
-        *(*output)++ = c;
+        *(* (uint8_t**) output)++ = c;
     else if (c < 0x800)
-        *(*output)++ = 0xc0 | 0x1f & c >> 6,
-        *(*output)++ = 0x80 | 0x3f & c;
+        *(* (uint8_t**) output)++ = 0xc0 | 0x1f & c >> 6,
+        *(* (uint8_t**) output)++ = 0x80 | 0x3f & c;
     else if (c <= 0xffff)
-        *(*output)++ = 0xe0 | 0x0f & c >> 12,
-        *(*output)++ = 0x80 | 0x3f & c >> 6,
-        *(*output)++ = 0x80 | 0x3f & c;
+        *(* (uint8_t**) output)++ = 0xe0 | 0x0f & c >> 12,
+        *(* (uint8_t**) output)++ = 0x80 | 0x3f & c >> 6,
+        *(* (uint8_t**) output)++ = 0x80 | 0x3f & c;
     else return pgOutputUtf8(output, 0xfffd); // substitute character
     return *output;
+}
+char *pgToUtf8(const wchar_t *string) {
+    char *output = malloc(3 * wcslen(string) + 1);
+    char *p = output;
+    for (const wchar_t *i = string; *i; i++)
+        pgOutputUtf8(&p, *i);
+    *p = 0;
+    return realloc(output, p - output + 1);
+}
+wchar_t *pgFromUtf8(const char *string) {
+    wchar_t *output = malloc(sizeof (wchar_t) * (strlen(string) + 1));
+    wchar_t *p = output;
+    while ((*p++ = pgStepUtf8(&string)));
+    return realloc(output, sizeof (wchar_t) * (p - output + 1));
 }
 #undef trailing
 #undef overlong
@@ -65,12 +80,12 @@ PgStringBuffer *pgBufferCharacter(PgStringBuffer *buffer, unsigned c) {
     *p = 0;
     return buffer;
 }
-PgStringBuffer *pgBufferString(PgStringBuffer *buffer, const uint8_t *text, int length) {
+PgStringBuffer *pgBufferString(PgStringBuffer *buffer, const char *text, int length) {
     if (length < 0) length = strlen(text);
     for (int i = 0; i < length; i++) pgBufferCharacter(buffer, text[i]);
     return buffer;
 }
-PgStringBuffer *pgBufferFormat(PgStringBuffer *buffer, const uint8_t *format, ...) {
+PgStringBuffer *pgBufferFormat(PgStringBuffer *buffer, const char *format, ...) {
     va_list ap;
     char *temp = malloc(65536 + 1);
     va_start(ap, format);
@@ -78,7 +93,7 @@ PgStringBuffer *pgBufferFormat(PgStringBuffer *buffer, const uint8_t *format, ..
     va_end(ap);
     pgBufferString(buffer, temp, -1);
     free(temp);
-    
+
     return buffer;
 }
 void pgFreeStringBuffer(PgStringBuffer *buffer) {
@@ -106,9 +121,9 @@ static void segmentQuad(segs_t *segs, PgPt a, PgPt b, PgPt c, int n, float flatn
         addSeg(segs, a, c);
         return;
     }
-    PgPt m = { (a.x + 2.0f * b.x + c.x) / 4.0f, (a.y + 2.0f * b.y + c.y) / 4.0f }; 
-    PgPt d = { (a.x + c.x) / 2.0f - m.x, (a.y + c.y) / 2.0f - m.y }; 
-    if (d.x * d.x + d.y * d.y > 0.05f) { 
+    PgPt m = { (a.x + 2.0f * b.x + c.x) / 4.0f, (a.y + 2.0f * b.y + c.y) / 4.0f };
+    PgPt d = { (a.x + c.x) / 2.0f - m.x, (a.y + c.y) / 2.0f - m.y };
+    if (d.x * d.x + d.y * d.y > 0.05f) {
         PgPt ab = midpoint(a, b);
         PgPt bc = midpoint(b, c);
         PgPt abc = midpoint(ab, bc);
@@ -204,7 +219,7 @@ static void bmp_resize(Pg *g, int width, int height) {
     g->stride = width;
     g->width = width;
     g->height = height;
-    g->clip = (PgRect){ 0, 0, width, height };
+    g->clip = (PgRect){ {0, 0, width, height} };
     g->bmp = malloc(width * height * 4);
 }
 static segs_t bmp_segmentPath(PgPath *path, PgMatrix ctm, bool close, float flatness) {
@@ -228,18 +243,18 @@ static segs_t bmp_segmentPath(PgPath *path, PgMatrix ctm, bool close, float flat
     }
     return segs;
 }
-static void bmp_fillPath(Pg *g, PgPath *path, uint32_t color) {
+static void bmp_fillPath(Pg *g, uint32_t color, PgPath *path) {
     if (!path->npoints) return;
-    
+
     PgMatrix ctm = g->ctm;
     PgRect binding_box = pgGetPathBindingBox(path, ctm);
-    
+
     if (binding_box.a.x >= g->clip.x2 ||
         binding_box.a.y >= g->clip.y2 ||
         binding_box.b.x <  g->clip.x1 ||
         binding_box.b.y <  g->clip.y1)
         return;
-    
+
     pgScaleMatrix(&ctm, 1, g->subsamples);
     segs_t segs = bmp_segmentPath(path, ctm, true, g->flatness);
     qsort(segs.data, segs.n, sizeof(seg_t), sortSegsDescending);
@@ -247,7 +262,7 @@ static void bmp_fillPath(Pg *g, PgPath *path, uint32_t color) {
     for (seg_t *seg = segs.data + 1; seg < segs.data + segs.n; seg++)
         maxY = max(maxY, seg->b.y);
     maxY = clamp(g->clip.y1, maxY / g->subsamples + 1, g->clip.y2);
-    
+
     // Scan through lines filling between edge
     typedef struct { float x, m, y2; } edge_t;
     edge_t *edges = malloc(segs.n * sizeof (edge_t));
@@ -284,7 +299,7 @@ static void bmp_fillPath(Pg *g, PgPath *path, uint32_t color) {
                     edges[j] = edges[j - 1];
                     edges[j - 1] = tmp;
                 }
-                    
+
             float level = 255.0f / g->subsamples;
             for (edge_t *e = edges + 1; e < edges + nedges; e += 2) {
                 float x1 = e[-1].x;
@@ -316,7 +331,7 @@ static void bmp_fillPath(Pg *g, PgPath *path, uint32_t color) {
     free(edges);
     free(segs.data);
 }
-static void bmp_strokePath(Pg *g, PgPath *path, float width, uint32_t color) {
+static void bmp_strokePath(Pg *g, uint32_t color, PgPath *path, float width) {
     PgMatrix otm = g->ctm;
     segs_t segs = bmp_segmentPath(path, g->ctm, false, g->flatness);
     for (seg_t *seg = segs.data; seg < segs.data + segs.n; seg++) {
@@ -339,7 +354,7 @@ static void bmp_strokePath(Pg *g, PgPath *path, float width, uint32_t color) {
         pgLine(sub, vert[2]);
         pgLine(sub, vert[3]);
         pgMultiply(g, &otm);
-        pgFillPath(g, sub, color);
+        pgFillPath(g, color, sub);
         pgFreePath(sub);
     }
     free(segs.data);
@@ -350,11 +365,12 @@ static Pg *bmp_subsection(Pg *original, PgRect rect) {
     *g = *original;
     rect.a = pgPt(clamp(0, rect.a.x, g->width), clamp(0, rect.a.y, g->height));
     rect.b = pgPt(clamp(rect.a.x, rect.b.x, g->width), clamp(rect.a.y, rect.b.y, g->height));
-    g->clip = (PgRect){
+    g->clip = (PgRect) {{
         clamp(0, g->clip.a.x - rect.a.x, rect.b.x),
         clamp(0, g->clip.a.y - rect.a.y, rect.b.y),
         clamp(0, g->clip.b.x - rect.a.x, rect.b.x - rect.a.x),
-        clamp(0, g->clip.b.y - rect.a.y, rect.b.y - rect.a.y)};
+        clamp(0, g->clip.b.y - rect.a.y, rect.b.y - rect.a.y)
+    }};
     g->width = rect.b.x - rect.a.x;
     g->height = rect.b.y - rect.a.y;
     g->borrowed = true;
@@ -450,11 +466,11 @@ void pgRotateMatrix(PgMatrix *mat, float rad) {
 }
 void pgMultiplyMatrix(PgMatrix * __restrict a, const PgMatrix * __restrict b) {
     PgMatrix old = *a;
-    
+
     a->a = old.a * b->a + old.b * b->c;
     a->c = old.c * b->a + old.d * b->c;
     a->e = old.e * b->a + old.f * b->c + b->e;
-    
+
     a->b = old.a * b->b + old.b * b->d;
     a->d = old.c * b->b + old.d * b->d;
     a->f = old.e * b->b + old.f * b->d + b->f;
@@ -482,11 +498,11 @@ static void addPathPart(PgPath *path, int type, ...) {
             path->types = realloc(path->types, path->typeCap * sizeof(int));
         path->types[path->ntypes++] = type;
     }
-    
+
     if (path->npoints + max(type, 1) >= path->pointCap)
         path->pointCap = max(path->pointCap * 2, 32),
         path->data = realloc(path->data, path->pointCap * sizeof(PgPt));
-    
+
     va_list ap;
     va_start(ap, type);
     for (int i = 0; i < max(type, 1); i++) {
@@ -526,15 +542,15 @@ void pgClosePath(PgPath *path) {
     if (!path->nsubs) return;
     addPathPart(path, PG_LINE, path->data[path->npoints - path->subs[path->nsubs - 1]]);
 }
-void pgFillPath(Pg *g, PgPath *path, uint32_t color) {
-    g->fillPath(g, path, color);
+void pgFillPath(Pg *g, uint32_t color, PgPath *path) {
+    g->fillPath(g, color, path);
 }
-void pgStrokePath(Pg *g, PgPath *path, float width, uint32_t color) {
-    g->strokePath(g, path, width, color);
+void pgStrokePath(Pg *g, uint32_t color, PgPath *path, float width) {
+    g->strokePath(g, color, path, width);
 }
 PgRect pgGetPathBindingBox(PgPath *path, PgMatrix ctm) {
-    if (path->npoints == 0) return (PgRect){0.0f, 0.0f, 0.0f, 0.0f};
-    PgRect r = {INFINITY, INFINITY, -INFINITY, -INFINITY};
+    if (path->npoints == 0) return (PgRect) {{ 0.0f, 0.0f, 0.0f, 0.0f }};
+    PgRect r = {{ INFINITY, INFINITY, -INFINITY, -INFINITY }};
     for (PgPt *i = path->data; i < path->data + path->npoints; i++) {
         PgPt p = pgTransformPoint(ctm, *i);
         if (p.x < r.a.x) r.a.x = p.x;
@@ -564,7 +580,7 @@ PgPath *pgTransformPath(PgPath *path, PgMatrix ctm) {
     return path;
 }
 
-    
+
 PgStringBuffer *pgPathAsSvgPath(PgStringBuffer *buffer, PgPath *path) {
     if (not buffer)
         buffer = pgNewStringBuffer();
@@ -590,23 +606,24 @@ int pgGetGlyph(PgFont *font, int c) {
         }
     return g;
 }
-PgFontFamily *pgScanFonts() {
+PgFontFamily *pgScanFonts(void) {
     return _pgScanFonts();
 }
 PgFont *pgLoadFontHeader(const void *file, int fontIndex) {
-    if (pgIsSimpleFont(file)) return (PgFont*)pgLoadSimpleFontHeader(file, fontIndex);
     return (PgFont*)pgLoadOpenTypeFontHeader(file, fontIndex);
 }
-PgFont *pgLoadFont(const void *file, int fontIndex) {
-    if (pgIsSimpleFont(file)) return (PgFont*)pgLoadSimpleFont(file, fontIndex);
+PgFont *pgLoadFontFromMemory(const void *file, int fontIndex) {
     return (PgFont*)pgLoadOpenTypeFont(file, fontIndex);
 }
 PgFont *pgLoadFontFromFile(const wchar_t *filename, int index) {
+    if (!filename)
+        return NULL;
+
     void *host;
     void *data = _pgMapFile(&host, filename);
     if (!data)
         return NULL;
-    PgFont *font = (PgFont*)pgLoadOpenTypeFont(data, index);
+    PgFont *font = (PgFont*)pgLoadFontFromMemory(data, index);
     if (!font) {
         _pgFreeFileMap(host);
         return NULL;
@@ -615,6 +632,13 @@ PgFont *pgLoadFontFromFile(const wchar_t *filename, int index) {
     font->freeHost = _pgFreeFileMap;
     return font;
 }
+
+// This searches for and loads a font from the system font list.
+// The family name is case-insensitive.
+// If weight is not found, it will attempt to select the next higher
+// then the next lower weight available.
+// If the italic style is requested and not available, the roman form
+// is looked up with the same rules as above.
 PgFont *pgOpenFont(const wchar_t *family, int weight, bool italic) {
     weight /= 100;
     if (weight == 0)
@@ -622,23 +646,27 @@ PgFont *pgOpenFont(const wchar_t *family, int weight, bool italic) {
     else if (weight >= 10)
         return NULL;
     pgScanFonts();
+
+    PgFontFamily *fam = NULL;
     for (int i = 0; i < PgNFontFamilies; i++)
         if (!wcsicmp(family, PgFontFamilies[i].name)) {
-            for (int j = 0; j < 2; j++) {
-                const wchar_t **set = italic - j? PgFontFamilies[i].italic: PgFontFamilies[i].roman;
-                const int *indexSet = italic - j? PgFontFamilies[i].italicIndex: PgFontFamilies[i].romanIndex;
-                PgFont *font;
-                for (int i = 0; i < 10; i++)
-                {
-                    if (weight + i < 10 && set[weight + i] && (font = pgLoadFontFromFile(set[weight + i], indexSet[weight + i])))
-                        return font;
-                    if (weight - i > 0 && set[weight - i] && (font = pgLoadFontFromFile(set[weight - i], indexSet[weight - i])))
-                        return font;
-                }
-            }
+            fam = PgFontFamilies + i;
             break;
-        } 
-    return NULL;
+        }
+    if (!fam)
+        return NULL;
+
+    PgFont *font = NULL;
+    struct pgFontDesc *i = (italic? fam->italic: fam->roman) + weight;
+    struct pgFontDesc *r = fam->roman + weight;
+    return  (font = pgLoadFontFromFile(i[0].path, i[0].index)) ||
+            (font = pgLoadFontFromFile(i[1].path, i[1].index)) ||
+            (font = pgLoadFontFromFile(i[-1].path, i[-1].index)) ||
+            (font = pgLoadFontFromFile(r[0].path, r[0].index)) ||
+            (font = pgLoadFontFromFile(r[1].path, r[1].index)) ||
+            (font = pgLoadFontFromFile(r[-1].path, r[-1].index))
+        ? font
+        : NULL;
 }
 void pgFreeFont(PgFont *font) {
     free(font->subs);
@@ -727,65 +755,77 @@ void pgSubstituteGlyph(PgFont *font, uint16_t in, uint16_t out) {
     font->subs[font->nsubs].out = out;
     font->nsubs++;
 }
-float pgFillGlyph(Pg *g, PgFont *font, float x, float y, int glyph, uint32_t color) {
+float pgFillGlyph(Pg *g, PgFont *font, uint32_t color, float x, float y, int glyph) {
     PgPath *path = pgGetGlyphPath(font, NULL, glyph);
     if (path) {
         for (int i = 0; i < path->npoints; i++)
             path->data[i].x += x,
             path->data[i].y += y;
-        pgFillPath(g, path, color);
+        pgFillPath(g, color, path);
         pgFreePath(path);
     }
     return x + pgGetGlyphWidth(font, glyph);
 }
-float pgFillChar(Pg *g, PgFont *font, float x, float y, int c, uint32_t color) {
-    return pgFillGlyph(g, font, x, y, pgGetGlyph(font, c), color);
+float pgFillChar(Pg *g, PgFont *font, uint32_t color, float x, float y, int c) {
+    return pgFillGlyph(g, font, color,  x, y, pgGetGlyph(font, c));
 }
-float pgFillString(Pg *g, PgFont *font, float x, float y, const wchar_t *text, int len, uint32_t color) {
+float pgFillString(Pg *g, PgFont *font, uint32_t color, float x, float y, const wchar_t *text, int len) {
     if (len < 0) len = wcslen(text);
     for (int i = 0; i < len; i++)
-        x = pgFillChar(g, font, x, y, text[i], color);
+        x = pgFillChar(g, font, color, x, y, text[i]);
     return x;
 }
-float pgFillUtf8(Pg *g, PgFont *font, float x, float y, const char *text, int len, uint32_t color) {
+float pgFillUtf8(Pg *g, PgFont *font, uint32_t color, float x, float y, const char *text, int len) {
     if (len < 0) len = strlen(text);
     const char *end = text + len;
     const char *p = text;
     while (p < end)
-        x = pgFillChar(g, font, x, y, pgStepUtf8(&p), color);
+        x = pgFillChar(g, font, color, x, y, pgStepUtf8(&p));
     return x;
 }
-void pgFillRect(Pg *g, PgPt a, PgPt b, uint32_t color) {
+float pgPrintf(Pg *g, PgFont *font, uint32_t color, float x, float y, const char *format, ...) {
+    va_list ap;
+    va_start(ap, format);
+    int len = vsnprintf(NULL, 0, format, ap);
+    va_start(ap, format);
+    char *buffer = malloc(len + 1);
+    vsprintf(buffer, format, ap);
+    x = pgFillUtf8(g, font, color, x, y, buffer, len);
+    free(buffer);
+    va_end(ap);
+    return x;
+}
+void pgFillRect(Pg *g, uint32_t color, PgPt a, PgPt b) {
     PgPath *path = pgNewPath();
     pgMove(path, a);
     pgLine(path, pgPt(b.x, a.y));
     pgLine(path, b);
     pgLine(path, pgPt(a.x, b.y));
-    pgFillPath(g, path, color);
+    pgFillPath(g, color, path);
     pgFreePath(path);
 }
-void pgStrokeRect(Pg *g, PgPt a, PgPt b, float width, uint32_t color) {
+void pgStrokeRect(Pg *g, uint32_t color, PgPt a, PgPt b, float width) {
     PgPath *path = pgNewPath();
     pgMove(path, a);
     pgLine(path, pgPt(b.x, a.y));
     pgLine(path, b);
     pgLine(path, pgPt(a.x, b.y));
     pgClosePath(path);
-    pgStrokePath(g, path, width, color);
+    pgStrokePath(g, color, path, width);
     pgFreePath(path);
 }
-void pgStrokeLine(Pg *g, PgPt a, PgPt b, float width, uint32_t color) {
+void pgStrokeLine(Pg *g, uint32_t color, PgPt a, PgPt b, float width) {
     PgPath *path = pgNewPath();
     pgMove(path, a);
     pgLine(path, b);
-    pgStrokePath(g, path, width, color);
+    pgStrokePath(g, color, path, width);
     pgFreePath(path);
 }
-void pgStrokeHLine(Pg *g, PgPt a, float x2, float width, uint32_t color) {
-    pgStrokeLine(g, a, pgPt(x2, a.y), width, color);
+void pgStrokeHLine(Pg *g, uint32_t color, PgPt a, float x2, float width) {
+    pgStrokeLine(g, color, a, pgPt(x2, a.y), width);
 }
-void pgStrokeVLine(Pg *g, PgPt a, float y2, float width, uint32_t color) {
-    pgStrokeLine(g, a, pgPt(a.x, y2), width, color);
+void pgStrokeVLine(Pg *g, uint32_t color, PgPt a, float y2, float width) {
+    pgStrokeLine(g, color, a, pgPt(a.x, y2), width);
 }
 PgPath *pgInterpretSvgPath(PgPath *path, const char *svg) {
     PgPt    start = {0.0f, 0.0f};
@@ -795,13 +835,13 @@ PgPath *pgInterpretSvgPath(PgPath *path, const char *svg) {
     float   args[6];
     char    cmd = 0;
     int     argsNeeded = 0;
-    
+
     if (not path)
         path = pgNewPath();
-    
+
     while (true) {
         while (*svg and (isspace(*svg) or *svg==',')) svg++;
-        
+
         switch (tolower(*svg)) {
         case 'c': argsNeeded = 6; cmd = *svg++; break;
         case 'h': argsNeeded = 1; cmd = *svg++; break;
@@ -819,7 +859,7 @@ PgPath *pgInterpretSvgPath(PgPath *path, const char *svg) {
             break;
         default: return path; // invalid command
         }
-        
+
         const char *before = svg;
         for (int i = 0; i < argsNeeded; i++) {
             while (*svg and (isspace(*svg) or *svg==',')) svg++;
@@ -827,12 +867,12 @@ PgPath *pgInterpretSvgPath(PgPath *path, const char *svg) {
             args[i] = strtod(svg, (char**)&svg);
             if (before == svg) svg++; // strtod will not accept -, +, or . without a digit after it
         }
-        
+
 //        if (path->npoints == 0) puts("\n");
 //        putchar(cmd);
 //        for (int i = 0; i < argsNeeded; i++) printf(" %g", args[i]);
 //        putchar('\n');
-        
+
         switch (cmd) {
         case 'M':
             start = a = pgPt(args[0], args[1]);
