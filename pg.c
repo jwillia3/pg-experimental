@@ -331,7 +331,7 @@ static void bmp_fillPath(Pg *g, uint32_t color, PgPath *path) {
     free(edges);
     free(segs.data);
 }
-static void bmp_strokePath(Pg *g, uint32_t color, PgPath *path, float width) {
+static void bmp_strokePath(Pg *g, float width, uint32_t color, PgPath *path) {
     PgMatrix otm = g->ctm;
     segs_t segs = bmp_segmentPath(path, g->ctm, false, g->flatness);
     for (seg_t *seg = segs.data; seg < segs.data + segs.n; seg++) {
@@ -545,8 +545,8 @@ void pgClosePath(PgPath *path) {
 void pgFillPath(Pg *g, uint32_t color, PgPath *path) {
     g->fillPath(g, color, path);
 }
-void pgStrokePath(Pg *g, uint32_t color, PgPath *path, float width) {
-    g->strokePath(g, color, path, width);
+void pgStrokePath(Pg *g, float width, uint32_t color, PgPath *path) {
+    g->strokePath(g, width, color, path);
 }
 PgRect pgGetPathBindingBox(PgPath *path, PgMatrix ctm) {
     if (path->npoints == 0) return (PgRect) {{ 0.0f, 0.0f, 0.0f, 0.0f }};
@@ -623,6 +623,7 @@ PgFont *pgLoadFontFromFile(const wchar_t *filename, int index) {
     void *data = _pgMapFile(&host, filename);
     if (!data)
         return NULL;
+
     PgFont *font = (PgFont*)pgLoadFontFromMemory(data, index);
     if (!font) {
         _pgFreeFileMap(host);
@@ -811,14 +812,14 @@ void pgStrokeRect(Pg *g, uint32_t color, PgPt a, PgPt b, float width) {
     pgLine(path, b);
     pgLine(path, pgPt(a.x, b.y));
     pgClosePath(path);
-    pgStrokePath(g, color, path, width);
+    pgStrokePath(g, width, color, path);
     pgFreePath(path);
 }
 void pgStrokeLine(Pg *g, uint32_t color, PgPt a, PgPt b, float width) {
     PgPath *path = pgNewPath();
     pgMove(path, a);
     pgLine(path, b);
-    pgStrokePath(g, color, path, width);
+    pgStrokePath(g, width, color, path);
     pgFreePath(path);
 }
 void pgStrokeHLine(Pg *g, uint32_t color, PgPt a, float x2, float width) {
@@ -860,7 +861,6 @@ PgPath *pgInterpretSvgPath(PgPath *path, const char *svg) {
         default: return path; // invalid command
         }
 
-        const char *before = svg;
         for (int i = 0; i < argsNeeded; i++) {
             while (*svg and (isspace(*svg) or *svg==',')) svg++;
             const char *before = svg;

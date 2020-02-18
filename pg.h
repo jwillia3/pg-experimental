@@ -110,13 +110,12 @@ typedef struct PgStringBuffer {
 
 PgFontFamily    *PgFontFamilies;
 int             PgNFontFamilies;
-static PgPt     pgZero;
 
 
-static PgPt pgPt(float x, float y) { return (PgPt){x,y}; }
-static PgPt pgAddPt(PgPt a, PgPt b) { return (PgPt){a.x + b.x, a.y + b.y}; }
-static PgPt pgSubtractPt(PgPt a, PgPt b) { return (PgPt){a.x - b.x, a.y - b.y}; }
-static PgRect pgRect(PgPt a, PgPt b) { return (PgRect){ .a = a, .b = b }; }
+inline static PgPt pgPt(float x, float y) { return (PgPt){x,y}; }
+inline static PgPt pgAddPt(PgPt a, PgPt b) { return (PgPt){a.x + b.x, a.y + b.y}; }
+inline static PgPt pgSubtractPt(PgPt a, PgPt b) { return (PgPt){a.x - b.x, a.y - b.y}; }
+inline static PgRect pgRect(PgPt a, PgPt b) { return (PgRect){ .a = a, .b = b }; }
 uint32_t pgBlendWithGamma(uint32_t fg, uint32_t bg, uint8_t a255, uint16_t *toLinear, uint8_t *toGamma);
 uint32_t pgBlend(uint32_t fg, uint32_t bg, uint8_t a);
 
@@ -150,7 +149,6 @@ void pgFreeStringBuffer(PgStringBuffer *buffer);
     void pgMultiply(Pg *g, const PgMatrix * __restrict b);
 
 // MATRIX MANAGEMENT
-    static PgMatrix PgIdentity = { 1, 0, 0, 1, 0, 0 };
     void pgIdentityMatrix(PgMatrix *mat);
     void pgTranslateMatrix(PgMatrix *mat, float x, float y);
     void pgScaleMatrix(PgMatrix *mat, float x, float y);

@@ -1,4 +1,5 @@
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
@@ -7,6 +8,48 @@
 #include "util.h"
 
 #define CHR4(A,B,C,D) ((A << 24) + (B << 16) + (C << 8) + D)
+
+struct CFFEntry {
+    unsigned        key;
+    const uint8_t   *value;
+};
+
+typedef struct {
+    unsigned        n;
+    struct CFFEntry *entries;
+    const uint8_t   *base;
+} CFFDict;
+
+typedef struct {
+    unsigned n;
+    unsigned sz;
+    const uint8_t *offsets;
+    const uint8_t *data;
+} CFFIndex;
+
+struct PgOpenTypeFont {
+    PgFont          _;
+
+    // OpenType table pointers
+    const int16_t   *hmtx;
+    const void      *glyf;
+    const void      *loca;
+    const void      *gsub;
+    uint16_t        *cmap;
+    const uint8_t   *cff;
+
+    // CFF/Postscript tables
+    CFFIndex        gsubrIndex;
+    CFFIndex        subrIndex;
+    CFFIndex        charstringIndex;
+
+    bool            longLoca;
+    int             nhmtx;
+    int             nglyphs;
+    bool            isPostscript;
+    uint32_t        lang;
+    uint32_t        script;
+};
 
 #pragma pack(push, 1)
 typedef struct {
@@ -65,15 +108,17 @@ typedef struct {
 typedef struct {
     uint16_t ncontours, x1, y1, x2, y2, ends[];
 } Glyf;
-
 #pragma pack(pop)
+
+static bool loadCFF(PgOpenTypeFont *otf);
+static bool cffGetGlyphPath(PgOpenTypeFont *otf, PgPath *path, int glyph);
 
 static int getGlyph(PgFont *font, int c) {
     PgOpenTypeFont *otf = (PgOpenTypeFont*)font;
     return otf->cmap[c & 0xffff];
 }
-static PgPath *_getGlyphPath(PgFont *font, PgPath *path, int glyph) {
-    PgOpenTypeFont *otf = (PgOpenTypeFont*)font;
+
+static bool ttfGetGlyphPath(PgOpenTypeFont *otf, PgPath *path, int glyph) {
     glyph &= 0xffff;
     if (glyph >= otf->nglyphs)
         glyph = 0;
@@ -84,9 +129,7 @@ static PgPath *_getGlyphPath(PgFont *font, PgPath *path, int glyph) {
             (void*)((uint8_t*)otf->glyf + nativeu32(loca32[glyph])):
         loca16[glyph] == loca16[glyph + 1]? NULL:
             (void*)((uint8_t*)otf->glyf + nativeu16(loca16[glyph]) * 2);
-    if (!data) return NULL;
-
-    if (!path) path = pgNewPath();
+    if (!data) return false;
 
     int ncontours = native16(data->ncontours);
     if (ncontours > 0) {
@@ -208,7 +251,7 @@ static PgPath *_getGlyphPath(PgFont *font, PgPath *path, int glyph) {
             }
 
             int oldN = path->npoints;
-            _getGlyphPath(font, path, index);
+            ttfGetGlyphPath(otf, path, index);
             for (int i = oldN; i < path->npoints; i++) {
                 float m = max(fabsf(a), fabsf(b));
                 float n = max(fabsf(c), fabsf(d));
@@ -220,11 +263,22 @@ static PgPath *_getGlyphPath(PgFont *font, PgPath *path, int glyph) {
             }
         } while (flags & 32);
     }
-    return path;
+    return true;
 }
 static PgPath *getGlyphPath(PgFont *font, PgPath *path, int glyph) {
-    path = _getGlyphPath(font, path, glyph);
-    if (!path) return NULL;
+    bool created = !path;
+    if (created) path = pgNewPath();
+
+    bool success = ((PgOpenTypeFont*) font)->isPostscript
+        ? cffGetGlyphPath((PgOpenTypeFont *)font, path, glyph)
+        : ttfGetGlyphPath((PgOpenTypeFont *)font, path, glyph);
+
+    if (!success) {
+        if (created)
+            pgFreePath(path);
+        return NULL;
+    }
+
     PgMatrix ctm = font->ctm;
     ctm.d *= -1;
     ctm.f -= font->ascender * ctm.d;
@@ -242,9 +296,12 @@ PgOpenTypeFont *pgLoadOpenTypeFontHeader(const void *file, int fontIndex) {
     if (!file) return NULL;
     SfntHeader *sfnt = (void*)file;
     int nfonts = 1;
+    bool isPostscript = false;
 
 redoHeader:
-    if (native32(sfnt->ver) == 0x10000);
+    if (native32(sfnt->ver) == 0x10000) {
+    } else if (native32(sfnt->ver) == CHR4('O','T','T','O'))
+        isPostscript = true;
     else if (native32(sfnt->ver) == CHR4('t','t','c','f')) { // TrueType Collection
         TtcHeader *ttc = (void*)file;
         nfonts = nativeu32(ttc->nfonts);
@@ -263,6 +320,7 @@ redoHeader:
     const void *glyf = NULL;
     const void *loca = NULL;
     const void *gsub = NULL;
+    const void *cff = NULL;
 
     struct { uint32_t tag, checksum, offset, size; } *thead = (void*)(sfnt + 1);
     for (int i = 0; i < nativeu16(sfnt->ntables); i++, thead++) {
@@ -278,17 +336,29 @@ redoHeader:
         case CHR4('O','S','/','2'): os2  = address; break;
         case CHR4('n','a','m','e'): name = address; break;
         case CHR4('G','S','U','B'): gsub = address; break;
+        case CHR4('C','F','F',' '): cff = address; break;
         }
     }
+
+    // These are required by all OpenType fonts
+    if (!cmap || !head || !hhea || !hmtx || !maxp || !name || !os2)
+        return NULL;
+
+    if (!isPostscript && (!glyf || !loca))
+        return NULL;
+    if (isPostscript && (!cff))
+        return NULL;
 
     PgOpenTypeFont *otf = calloc(1, sizeof *otf);
     PgFont *font = &otf->_;
     font->file = file;
+    otf->isPostscript = isPostscript;
     otf->hmtx = hmtx;
     otf->glyf = glyf;
     otf->loca = loca;
     otf->cmap = (void*)cmap;
     otf->gsub = gsub;
+    otf->cff = cff;
     otf->lang = CHR4('e','n','g',' ');
     otf->script = CHR4('l','a','t','n');
     font->ctm = (PgMatrix){ 1, 0, 0, 1, 0, 0 };
@@ -372,6 +442,9 @@ redoHeader:
     if (!font->name)
         font->name = wcsdup(L"");
 
+    if (isPostscript)
+        if (!loadCFF(otf))
+            return NULL;
 
     return otf;
 }
@@ -446,7 +519,6 @@ static const void *offset(const void *base, unsigned offset) {
     return (const uint8_t*)base + offset;
 }
 
-#include <stdio.h>
 static void gsubSubtable(PgFont *font, int type, const GsubFormat *subtable) {
     const Coverage *coverage = offset(subtable, nativeu16(subtable->coverage));
 
@@ -493,7 +565,6 @@ static uint32_t *lookupFeatures(PgFont *font, const uint32_t *tags) {
         return calloc(1, sizeof (uint32_t));
     const ScriptList *scriptList = offset(gsub, nativeu16(gsub->scriptList));
 
-    bool outputTags = tags != NULL;
     if (!tags)
         tags = (uint32_t[1]) { 0 };
 
@@ -620,4 +691,422 @@ PgOpenTypeFont *pgLoadOpenTypeFont(const void *file, int fontIndex) {
     font->setFeatures = setFeatures;
     font->getFeatures = getFeatures;
     return otf;
+}
+
+static int cffRead16(const uint8_t ** restrict cff) {
+    uint8_t b1 = *(*cff)++;
+    uint8_t b2 = *(*cff)++;
+    return (b1 << 8) + b2;
+}
+
+static int cffRead24(const uint8_t ** restrict cff) {
+    uint8_t b1 = *(*cff)++;
+    uint8_t b2 = *(*cff)++;
+    uint8_t b3 = *(*cff)++;
+    return (b1 << 16) + (b2 << 8) + b3;
+}
+
+static int cffRead32(const uint8_t ** restrict cff) {
+    uint8_t b1 = *(*cff)++;
+    uint8_t b2 = *(*cff)++;
+    uint8_t b3 = *(*cff)++;
+    uint8_t b4 = *(*cff)++;
+    return (b1 << 24) + (b2 << 16) + (b3 << 8) + b4;
+}
+
+static CFFDict *cffAddEntry(CFFDict *dict, unsigned key, const uint8_t *value) {
+    if ((dict->n & 7) == 0)
+        dict->entries = realloc(dict->entries, (dict->n + 7 + 1) * sizeof *dict->entries);
+    dict->entries[dict->n++] = (struct CFFEntry) { key, value };
+    return dict;
+}
+
+static unsigned cffOffset(const CFFIndex *index, unsigned i) {
+    if (i > index->n || index->sz > 4)
+        return 0;
+    const uint8_t *ptr = index->offsets + i * index->sz;
+    return  index->sz == 1? *ptr:
+            index->sz == 2? cffRead16(&ptr):
+            index->sz == 3? cffRead24(&ptr):
+            index->sz == 4? cffRead32(&ptr):
+            0;
+}
+
+static const uint8_t *cffPointer(const CFFIndex *index, unsigned i, unsigned *size) {
+    *size = 0;
+    unsigned offset = cffOffset(index, i);
+    unsigned after = cffOffset(index, i + 1);
+    if (!offset || !after)
+        return NULL;
+    if (size)
+        *size = after - offset;
+    return index->data + offset;
+}
+
+static float cffParseNumber(const uint8_t ** restrict cff) {
+    if (**cff >= 32 && **cff <= 246)
+        return *(*cff)++ - 139;
+    else if (**cff >= 247 && **cff <= 250) {
+        uint8_t b0 = *(*cff)++;
+        uint8_t b1 = *(*cff)++;
+        return (b0 - 247) * 256 + b1 + 108;
+    } else if (**cff >= 251 && **cff <= 254) {
+        uint8_t b0 = *(*cff)++;
+        uint8_t b1 = *(*cff)++;
+        return -(b0 - 251) * 256 - b1 - 108;
+    } else if (**cff == 28) {
+        (*cff)++;
+        return (int16_t)cffRead16(cff); // sign-extend 16-bit value
+    } else if (**cff == 29) {
+        (*cff)++;
+        return cffRead32(cff);
+    } else if (**cff == 30) {
+        char buffer[64];
+        char *p = buffer;
+        (*cff)++;
+        for (uint8_t b; (b = *(*cff)++) != 0xff; )
+            for (int n = 0, nibble = b >> 4; n < 2; n++, nibble = b & 0xf)
+                if (nibble < 10)
+                    *p++ = nibble + '0';
+                else if (nibble == 10)
+                    *p++ = '.';
+                else if (nibble == 11)
+                    *p++ = 'E';
+                else if (nibble == 12)
+                    *p++ = 'E',
+                    *p++ = '-';
+                else if (nibble == 14)
+                    *p++ = '-';
+                else
+                    goto done;
+        done:
+        *p = 0;
+        return strtof(buffer, NULL);
+    } else
+        return 0;
+}
+
+// static const char *cffParseSID(const CFFIndex *stringIndex, const uint8_t ** restrict cff, unsigned *size) {
+//     int sid = cffParseNumber(cff) - 391;
+//     return (const char*) cffPointer(stringIndex, sid, size);
+// }
+
+
+static CFFIndex cffParseIndex(const uint8_t ** restrict cff) {
+    CFFIndex index;
+    int n = cffRead16(cff);
+    if (n == 0) {
+        // Short-cut zero-length index
+        index = (CFFIndex){ 0, 0, 0, 0 };
+        return index;
+    } else {
+        int sz = *(*cff)++;
+        const uint8_t *offsets = *cff;
+        const uint8_t *data = offsets + (n + 1) * sz;
+        index = (CFFIndex){ n, sz, offsets, data - 1 };
+
+        // Jump after the index
+        *cff = index.data + cffOffset(&index, n);
+        return index;
+    }
+}
+
+static CFFDict cffParseDict(const uint8_t ** restrict cff, unsigned size) {
+    CFFDict dict = {0, 0, *cff};
+    const uint8_t *end = *cff + size;
+    const uint8_t *value = *cff;
+    while (*cff < end) {
+        unsigned b = *(*cff)++;
+        if (b <= 21) {
+            if (b == 12)
+                b = (b << 8) + *(*cff)++;
+            cffAddEntry(&dict, b, value);
+            value = *cff;
+        } else if (b >= 28 && b <= 30 || b >= 32 && b <= 254) {
+            (*cff)--;
+            cffParseNumber(cff);
+        }
+    }
+    return dict;
+}
+
+// static const uint8_t *cffGetSubr(const CFFIndex *index, int i, unsigned *size) {
+//     unsigned bias =
+//         index->n < 1240? 107:
+//         index->n < 33900? 1131:
+//         32768;
+//     return cffPointer(index, i + bias, size);
+// }
+
+static bool loadCFF(PgOpenTypeFont *otf) {
+    const uint8_t   *cff = otf->cff;
+    unsigned        size;
+
+    int major = *cff++;
+    int minor = *cff++;
+    int headerSize = *cff++;
+    int absoluteOffsetSize = *cff++;
+    cff += headerSize - 4;
+
+    if (major != 1)
+        return false;
+
+    CFFIndex nameIndex = cffParseIndex(&cff);
+    CFFIndex topDictIndex = cffParseIndex(&cff);
+    CFFIndex stringIndex = cffParseIndex(&cff);
+    otf->gsubrIndex = cffParseIndex(&cff);
+
+    (void)minor;
+    (void)absoluteOffsetSize;
+    (void)nameIndex;
+    (void)stringIndex;
+
+    // OpenType specifies that there should be only one font
+    if (topDictIndex.n != 1)
+        return 0;
+
+    // Extract the settings we need out of Top DICT
+    CFFDict privateDict = {0};
+    unsigned charstringType = 2;
+
+    cff = cffPointer(&topDictIndex, 0, &size);
+    CFFDict topDict = cffParseDict(&cff, size);
+    for (unsigned i = 0; i < topDict.n; i++) {
+        unsigned size, offset;
+        const uint8_t *value = topDict.entries[i].value;
+
+        switch (topDict.entries[i].key) {
+
+        // CharString
+        case 17:
+            offset = cffParseNumber(&value);
+            value = otf->cff + offset;
+            otf->charstringIndex = cffParseIndex(&value);
+            break;
+
+        // CharstringType
+        case 0x0c06:
+            charstringType = cffParseNumber(&value);
+            break;
+
+        // PrivateDICT
+        case 18:
+            size = cffParseNumber(&value);
+            offset = cffParseNumber(&value);
+            value = otf->cff + offset;
+            privateDict = cffParseDict(&value, size);
+            break;
+        }
+    }
+
+    // Only handle Type2 charstrings
+    if (!otf->charstringIndex.n || charstringType != 2)
+        return false;
+
+    // Get local subroutines
+    if (privateDict.n == 0)
+        return false;
+    for (unsigned i = 0; i < privateDict.n; i++) {
+        const uint8_t *value = topDict.entries[i].value;
+        switch (privateDict.entries[i].key) {
+
+        // Subrs
+        case 19:
+            value = privateDict.base + (int)cffParseNumber(&value);
+            otf->subrIndex = cffParseIndex(&value);
+            break;
+        }
+    }
+    return true;
+}
+
+static void qqq(int operator, float *stack, int nstack) {
+    for (int i = 0; i < nstack; i++)
+        printf("%g ", stack[i]);
+    switch (operator) {
+    case  1: puts("hstem"); break;
+    case  3: puts("vstem"); break;
+    case  4: puts("vmoveto"); break;
+    case  5: puts("rlineto"); break;
+    case  6: puts("hlineto"); break;
+    case  7: puts("vlineto"); break;
+    case  8: puts("rrcurveto"); break;
+    case 10: puts("callsubr"); break;
+    case 11: puts("return"); break;
+    case 14: puts("endchar"); break;
+    case 18: puts("hstemhm"); break;
+    case 19: puts("hintmask"); break;
+    case 20: puts("cntrmask"); break;
+    case 21: puts("rmoveto"); break;
+    case 22: puts("hmoveto"); break;
+    case 23: puts("vstemhm"); break;
+    case 24: puts("rcuveline"); break;
+    case 25: puts("rlinecurve"); break;
+    case 26: puts("vvcurveto"); break;
+    case 27: puts("hhcurveto"); break;
+    case 29: puts("callgsubr"); break;
+    case 30: puts("vhcurveto"); break;
+    case 31: puts("hvcurveto"); break;
+    case 0xc03: puts("and"); break;
+    case 0xc04: puts("or"); break;
+    case 0xc05: puts("not"); break;
+    case 0xc09: puts("abs"); break;
+    case 0xc0a: puts("add"); break;
+    case 0xc0b: puts("sub"); break;
+    case 0xc0c: puts("div"); break;
+    case 0xc0e: puts("neg"); break;
+    case 0xc0f: puts("eq"); break;
+    case 0xc12: puts("drop"); break;
+    case 0xc14: puts("put"); break;
+    case 0xc15: puts("get"); break;
+    case 0xc16: puts("ifelse"); break;
+    case 0xc17: puts("random"); break;
+    case 0xc18: puts("mul"); break;
+    case 0xc1a: puts("sqrt"); break;
+    case 0xc1b: puts("dup"); break;
+    case 0xc1c: puts("exch"); break;
+    case 0xc1d: puts("index"); break;
+    case 0xc1e: puts("roll"); break;
+    case 0xc22: puts("hflex"); break;
+    case 0xc23: puts("flex"); break;
+    case 0xc24: puts("hflex1"); break;
+    case 0xc25: puts("flex1"); break;
+    default:
+        printf("resv %d\n", operator);
+    }
+}
+
+static bool cffInterpretCharstring(PgPath *path, const uint8_t *cur, const uint8_t *end) {
+    float   stack[48];
+    int     nstack = 0;
+
+    PgPt a = {0.0f, 0.0f};
+    while (cur < end) {
+
+        // Operand
+        if (*cur == 28 || *cur >= 32) {
+            if (nstack >= 48) {
+                puts("QQQ: Stack Overflow");
+                fflush(stdout);
+                return false;
+            }
+            stack[nstack++] = *cur == 255
+                ? (cur++, cffRead32(&cur)) / 65536.0f
+                : cffParseNumber(&cur);
+            continue;
+        }
+
+        unsigned operator = *cur == 12
+            ? (cur++, *cur++ + 0xc00)
+            : *cur++;
+            qqq(operator, stack, nstack);
+
+        switch (operator) {
+        // case  1: puts("hstem"); break;
+        // case  3: puts("vstem"); break;
+        case 4: // vmoveto
+            a = pgAddPt(a, pgPt(0.0f, stack[nstack - 1]));
+            pgMove(path, a);
+            break;
+        case  5: // rlineto
+            for (int i = 0; i < nstack; i += 2)
+                pgLine(path, a = pgAddPt(a, pgPt(stack[i], stack[i + 1])));
+            break;
+
+        case  6: // hlineto
+            if (nstack == 1)
+                pgLine(path, a = pgAddPt(a, pgPt(stack[0], 0.0f)));
+            else {
+                for (int i = 0; i + 1 < nstack; i += 2) {
+                    pgLine(path, a = pgAddPt(a, pgPt(stack[i], 0.0f)));
+                    pgLine(path, a = pgAddPt(a, pgPt(0.0f, stack[i + 1])));
+                }
+                if (nstack & 1)
+                    pgLine(path, a = pgAddPt(a, pgPt(stack[nstack - 1], 0.0f)));
+            }
+            break;
+
+        case  7: // vlineto
+            if (nstack == 1)
+                pgLine(path, a = pgAddPt(a, pgPt(0.0f, stack[0])));
+            else {
+                for (int i = 0; i + 1 < nstack; i += 2) {
+                    pgLine(path, a = pgAddPt(a, pgPt(0.0f, stack[i])));
+                    pgLine(path, a = pgAddPt(a, pgPt(stack[i + 1], 0.0f)));
+                }
+                if (nstack & 1)
+                    pgLine(path, a = pgAddPt(a, pgPt(0.0f, stack[nstack - 1])));
+            }
+            break;
+
+        case  8: // rrcurveto
+            for (int i = 0; i + 5 < nstack; i += 6) {
+                PgPt b = pgAddPt(a, pgPt(stack[i], stack[i + 1]));
+                PgPt c = pgAddPt(a, pgPt(stack[i + 2], stack[i + 3]));
+                PgPt d = pgAddPt(a, pgPt(stack[i + 4], stack[i + 5]));
+                pgCubic(path, b, c, a = d);
+            }
+            break;
+
+        // case 10: puts("callsubr"); break;
+        // case 11: puts("return"); break;
+
+        case 14: // endchar
+            pgClosePath(path);
+            return true;
+        // case 18: puts("hstemhm"); break;
+        // case 19: puts("hintmask"); break;
+        // case 20: puts("cntrmask"); break;
+        case 21: // rmoveto
+            pgMove(path, a = pgAddPt(a, pgPt(stack[nstack - 2], stack[nstack - 1])));
+            break;
+        case 22: // hmoveto
+            pgMove(path, a = pgAddPt(a, pgPt(stack[nstack - 1], 0.0f)));
+            break;
+        // case 23: puts("vstemhm"); break;
+        // case 24: puts("rcuveline"); break;
+        // case 25: puts("rlinecurve"); break;
+        // case 26: puts("vvcurveto"); break;
+        // case 27: puts("hhcurveto"); break;
+        // case 29: puts("callgsubr"); break;
+        // case 30: puts("vhcurveto"); break;
+        // case 31: puts("hvcurveto"); break;
+        // case 0xc03: puts("and"); break;
+        // case 0xc04: puts("or"); break;
+        // case 0xc05: puts("not"); break;
+        // case 0xc09: puts("abs"); break;
+        // case 0xc0a: puts("add"); break;
+        // case 0xc0b: puts("sub"); break;
+        // case 0xc0c: puts("div"); break;
+        // case 0xc0e: puts("neg"); break;
+        // case 0xc0f: puts("eq"); break;
+        // case 0xc12: puts("drop"); break;
+        // case 0xc14: puts("put"); break;
+        // case 0xc15: puts("get"); break;
+        // case 0xc16: puts("ifelse"); break;
+        // case 0xc17: puts("random"); break;
+        // case 0xc18: puts("mul"); break;
+        // case 0xc1a: puts("sqrt"); break;
+        // case 0xc1b: puts("dup"); break;
+        // case 0xc1c: puts("exch"); break;
+        // case 0xc1d: puts("index"); break;
+        // case 0xc1e: puts("roll"); break;
+        // case 0xc22: puts("hflex"); break;
+        // case 0xc23: puts("flex"); break;
+        // case 0xc24: puts("hflex1"); break;
+        // case 0xc25: puts("flex1"); break;
+        default:
+            // qqq(operator, stack, nstack);
+            break;
+        }
+
+        nstack = 0;
+    }
+    return true;
+}
+
+static bool cffGetGlyphPath(PgOpenTypeFont *otf, PgPath *path, int glyph) {
+    unsigned size;
+    const uint8_t *cur = cffPointer(&otf->charstringIndex, glyph, &size);
+    return cffInterpretCharstring(path, cur, cur + size);
 }

@@ -72,9 +72,6 @@ PgFontFamily *_pgScanFonts() {
         "fc-list -f '%{family[0]}:%{weight}: %{spacing}:%{slant}:%{width}:%{fontformat}:%{file}:%{index}\n'",
         "r");
 
-    PgFontFamily *all = NULL;
-    int n;
-
     size_t len = 0;
     char *buf = 0;
     while (getline(&buf, &len, pipe) > 0) {
@@ -125,7 +122,7 @@ PgFontFamily *_pgScanFonts() {
             familyName);
         familyName = preferredName;
 
-        if (wcscmp(L"TrueType", format))
+        if (wcscmp(L"TrueType", format) && wcscmp(L"CFF", format))
             continue;
 
         PgFontFamily *family = findFamily(familyName);
