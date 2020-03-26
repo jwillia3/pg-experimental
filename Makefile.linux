@@ -1,8 +1,10 @@
 CFLAGS=-std=gnu99 -O3 -Wall -Wextra -Werror -Wstrict-prototypes -Wno-parentheses -Wno-unused-function -Wno-unused-variable
 
-demo: demo.c libpg2.a
-	$(CC) $(CFLAGS) -I. -L. -odemo demo.c -lpg2 -lSDL2 -lm
+run: demo
 	./demo
+
+demo: demo.c libpg2.a
+	$(CC) $(CFLAGS) -I. -L. -g -odemo demo.c -lpg2 -lSDL2 -lm
 
 libpg2.a: pg.c pgOpenType.c platform.linux.c pg.h
 	$(CC) $(CFLAGS) -c pg.c pgOpenType.c platform.linux.c
@@ -10,3 +12,12 @@ libpg2.a: pg.c pgOpenType.c platform.linux.c pg.h
 
 clean:
 	rm *.o *.a
+
+install:    libpg2.a
+	cp /usr/include pg.h
+	cp /usr/lib libpg2.a
+
+uninstall:
+	rm /usr/include/pg.h
+	rm /usr/lib/libpg2.a
+

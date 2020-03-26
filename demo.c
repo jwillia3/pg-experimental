@@ -28,6 +28,10 @@ void draw(SDL_Window *window) {
     pgScanFonts();
     for (int i = 0; i < PgNFontFamilies; i++) {
         PgFont *font = pgOpenFont(PgFontFamilies[i].name, 0, false);
+        if (!font) {
+            printf("Cannot open %ls\n", PgFontFamilies[i].name);
+            continue;
+        }
         pgScaleFont(font, 0, lineHeight * 0.75f);
 
         float width = pgPrintf(g, font, 0x555555, x, y, "%ls", PgFontFamilies[i].name) - x;
