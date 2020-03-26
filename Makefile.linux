@@ -14,8 +14,8 @@ clean:
 	rm *.o *.a
 
 install:    libpg2.a
-	cp /usr/include pg.h
-	cp /usr/lib libpg2.a
+	cp pg.h /usr/include
+	cp libpg2.a /usr/lib
 
 uninstall:
 	rm /usr/include/pg.h

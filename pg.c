@@ -353,7 +353,6 @@ static void bmp_strokePath(Pg *g, uint32_t color, PgPath *path, float width) {
         pgLine(sub, vert[1]);
         pgLine(sub, vert[2]);
         pgLine(sub, vert[3]);
-        pgMultiply(g, &otm);
         pgFillPath(g, color, sub);
         pgFreePath(sub);
     }
